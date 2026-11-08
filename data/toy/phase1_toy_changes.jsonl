@@ -1,0 +1,3 @@
+{"doc_id":"2","url":"https://example.org/soil","title":"Soil","text":"Soil supports plants and forests.","links":["1"],"op":"DELETE"}
+{"doc_id":"3","url":"https://example.org/seed","title":"Seed","text":"A seed becomes a plant and links to soil.","links":["1","2"],"op":"UPSERT"}
+{"doc_id":"5","url":"https://example.org/forest","title":"Forest","text":"A forest contains many plants and trees.","links":["3","4"],"op":"UPSERT"}

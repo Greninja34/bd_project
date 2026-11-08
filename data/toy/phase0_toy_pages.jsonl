@@ -1,0 +1,7 @@
+{"doc_id":"1","url":"https://example.org/plant","title":"Plant","text":"Plant grows in soil.","links":["2"]}
+{"doc_id":"2","url":"https://example.org/soil","title":"Soil","text":"Soil supports a plant.","links":["1"]}
+{"doc_id":"2","url":"https://example.org/soil","title":"Soil duplicate","text":"duplicate row","links":[]}
+{"doc_id":"3","url":"https://example.org/seed","title":"Seed","text":"A seed becomes a plant.","links":["1"]}
+{"doc_id":"4","url":"https://example.org/tree","title":"Tree","text":"A tree grows from a seed.","links":["1","3"]}
+{"doc_id":"","url":"","title":"","text":"","links":[]}
+{"doc_id":null,"url":null,"title":null,"text":null,"links":null}

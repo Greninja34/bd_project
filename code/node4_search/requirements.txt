@@ -1,0 +1,7 @@
+fastapi==0.115.6
+uvicorn==0.32.1
+pandas==2.2.3
+pyarrow==18.1.0
+numpy==2.1.3
+# NLP twist "semantic rerank" (ONNX Runtime, no PyTorch). Optional: without it rerank=1 is just unavailable.
+fastembed==0.9.1

@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Team 32 Search</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --card: #ffffff; --ink: #1d1d1b; --muted: #6b6b66; --line: #e3e3de;
+    --accent: #2f5bd3; --bm: #2f5bd3; --pr: #d08a1e; --ok: #2e7d4f; --bad: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #141413; --card: #1f1f1d; --ink: #ecebe6; --muted: #a3a29b; --line: #34332f;
+            --accent: #7ea2ff; --bm: #7ea2ff; --pr: #f0b45a; --ok: #6cc28f; --bad: #ff8a80; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 32px 16px 64px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+  .badge { font-size: 12px; padding: 3px 9px; border-radius: 99px; border: 1px solid var(--line);
+           color: var(--muted); background: var(--card); }
+  .badge b { color: var(--ink); }
+  form { display: flex; gap: 8px; margin: 20px 0 6px; }
+  input[type=search] { flex: 1; min-width: 0; font: inherit; padding: 11px 14px; border-radius: 10px;
+                       border: 1px solid var(--line); background: var(--card); color: var(--ink); }
+  input[type=search]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  button { font: inherit; padding: 10px 16px; border-radius: 10px; border: 0; cursor: pointer;
+           background: var(--accent); color: #fff; }
+  button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--line); padding: 4px 10px; font-size: 13px; }
+  .meta { color: var(--muted); font-size: 13px; min-height: 20px; }
+  .result { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-top: 12px; }
+  .result a.title { font-size: 17px; color: var(--accent); text-decoration: none; font-weight: 600; }
+  .result a.title:hover { text-decoration: underline; }
+  .url { color: var(--ok); font-size: 13px; word-break: break-all; }
+  .snippet { margin: 6px 0 10px; }
+  .scores { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+  .bar { display: flex; width: 160px; height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; }
+  .bar span:first-child { background: var(--bm); } .bar span:last-child { background: var(--pr); }
+  .k-bm { color: var(--bm); } .k-pr { color: var(--pr); }
+  details { margin-top: 28px; color: var(--muted); font-size: 13px; }
+  table { border-collapse: collapse; width: 100%; margin-top: 8px; }
+  td, th { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  .err { color: var(--bad); }
+  .toggles { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 4px 0 8px; font-size: 13px; color: var(--muted); }
+  .toggles label { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }
+  .toggles label.off { opacity: .45; cursor: not-allowed; }
+  .notice { font-size: 14px; margin: 6px 0; }
+  .notice a { color: var(--accent); cursor: pointer; font-weight: 600; }
+  .chip, .kw { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 99px;
+               border: 1px solid var(--line); margin: 2px 4px 2px 0; }
+  .chip { color: var(--pr); } .kw { color: var(--muted); }
+  mark { background: color-mix(in srgb, var(--pr) 30%, transparent); color: inherit; padding: 0 1px; border-radius: 3px; }
+  .k-sem { color: var(--ok); }
+  code { font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Team 32 Search</h1>
+    <span class="badge" id="ver">loading...</span>
+  </header>
+  <form id="f">
+    <input type="search" id="q" placeholder="Search Simple English Wikipedia, e.g. ocean, plague, computer science" autofocus>
+    <button>Search</button>
+  </form>
+  <div class="toggles" id="toggles">
+    <span>NLP extras:</span>
+    <label title="Porter stemming: phases = phase"><input type="checkbox" data-opt="stem"> stemming</label>
+    <label title="search the spelling correction"><input type="checkbox" data-opt="spell"> auto-correct</label>
+    <label title="add Word2Vec neighbours at weight 0.3 x similarity"><input type="checkbox" data-opt="expand"> Word2Vec expansion</label>
+    <label title="best-matching sentence with highlights"><input type="checkbox" data-opt="smart"> smart snippets</label>
+    <label title="re-rank the top 20 with MiniLM embeddings"><input type="checkbox" data-opt="rerank"> semantic rerank</label>
+  </div>
+  <div class="meta" id="meta">All extras off = the spec's ranking: 0.7 x BM25 / max BM25 + 0.3 x PageRank / max PageRank</div>
+  <div id="notices"></div>
+  <div id="results"></div>
+
+  <details id="vers">
+    <summary>Versions on this node</summary>
+    <table><thead><tr><th>version</th><th>docs</th><th>created</th><th>Iceberg snapshot</th><th></th></tr></thead>
+      <tbody id="vbody"></tbody></table>
+  </details>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+async function loadHealth() {
+  try {
+    const h = await (await fetch("/api/health")).json();
+    $("ver").innerHTML = h.version ? `serving <b>${esc(h.version)}</b> · ${h.docs} docs`
+                                   : `<span class="err">no version loaded</span>`;
+    document.querySelectorAll("[data-opt]").forEach(cb => {
+      const ok = !h.nlp || h.nlp[cb.dataset.opt] !== false;
+      cb.disabled = !ok; cb.parentElement.classList.toggle("off", !ok);
+      if (!ok) { cb.checked = false; cb.parentElement.title += " (not available for this version)"; }
+    });
+  } catch { $("ver").innerHTML = `<span class="err">service unreachable</span>`; }
+}
+
+async function loadVersions() {
+  const v = await (await fetch("/api/versions")).json();
+  $("vbody").innerHTML = v.versions.map(x => `<tr>
+      <td><b>${esc(x.version)}</b>${x.version === v.serving ? " (serving)" : ""}</td>
+      <td>${x.valid ? x.docs : `<span class="err">invalid: ${esc(x.error)}</span>`}</td>
+      <td>${esc(x.created_at || "")}</td><td><code>${esc(x.docs_snapshot_id || "")}</code></td>
+      <td>${x.valid && x.version !== v.serving ? `<button class="ghost" data-v="${esc(x.version)}">serve this</button>` : ""}</td>
+    </tr>`).join("");
+  document.querySelectorAll("[data-v]").forEach(b => b.onclick = async () => {
+    const r = await fetch(`/api/admin/switch/${encodeURIComponent(b.dataset.v)}`, {method: "POST"});
+    if (!r.ok) alert((await r.json()).detail);
+    await loadHealth(); await loadVersions(); if ($("q").value) search();
+  });
+}
+
+const opts = () => [...document.querySelectorAll("[data-opt]")].filter(c => c.checked).map(c => c.dataset.opt);
+const marked = (text, marks) => {             // escape, then wrap the highlight spans in <mark>
+  let out = "", at = 0;
+  for (const [a, b] of marks || []) { out += esc(text.slice(at, a)) + "<mark>" + esc(text.slice(a, b)) + "</mark>"; at = b; }
+  return out + esc(text.slice(at));
+};
+
+async function search(qOverride) {
+  const q = (qOverride ?? $("q").value).trim();
+  if (!q) return;
+  $("q").value = q;
+  const on = opts();
+  const params = new URLSearchParams({q, k: 10});
+  on.forEach(o => params.set(o, 1));
+  history.replaceState(null, "", "?" + params);
+  $("meta").textContent = "searching...";
+  const r = await fetch(`/api/search?${params}`);
+  const d = await r.json();
+  if (!r.ok) { $("meta").innerHTML = `<span class="err">${esc(d.detail)}</span>`; $("results").innerHTML = ""; return; }
+  $("meta").textContent = `${d.matches} matching docs · terms [${d.terms.join(", ")}] · version ${d.version} · ${d.took_ms} ms` +
+                          (on.length ? ` · extras: ${on.join(", ")}` : " · spec ranking");
+  let n = "";
+  if (d.did_you_mean && !d.corrected) n += `<div class="notice">Did you mean <a id="dym">${esc(d.did_you_mean)}</a>?</div>`;
+  if (d.corrected) n += `<div class="notice">Showing results for <b>${esc(d.did_you_mean)}</b></div>`;
+  if (d.expansions.length) n += `<div class="notice">Expanded with: ${d.expansions.map(([w, e, s]) => `<span class="chip" title="${esc(w)} → ${esc(e)}, similarity ${s}">${esc(e)}</span>`).join("")}</div>`;
+  d.notes.forEach(x => n += `<div class="notice err">${esc(x)}</div>`);
+  $("notices").innerHTML = n;
+  if ($("dym")) $("dym").onclick = () => search(d.did_you_mean);
+  $("results").innerHTML = d.results.length ? d.results.map(x => {
+    const bm = 0.7 * x.bm25_norm, pr = 0.3 * x.pagerank_norm;
+    return `<div class="result">
+      <a class="title" href="${esc(x.url)}" target="_blank" rel="noopener">${x.rank}. ${esc(x.title)}</a>
+      <div class="url">${esc(x.url)} · doc_id ${esc(x.doc_id)}</div>
+      <div class="snippet">${marked(x.snippet, x.marks)}</div>
+      ${x.keywords.length ? `<div>${x.keywords.map(k => `<span class="kw">${esc(k)}</span>`).join("")}</div>` : ""}
+      <div class="scores">
+        <span class="bar" title="BM25 part vs PageRank part"><span style="width:${bm*100}%"></span><span style="width:${pr*100}%"></span></span>
+        <span>score <b>${x.score.toFixed(4)}</b></span>
+        <span class="k-bm">BM25 ${x.bm25} (${x.bm25_norm})</span>
+        <span class="k-pr">PageRank ${x.pagerank.toExponential(3)} (${x.pagerank_norm})</span>
+        ${x.semantic !== undefined ? `<span class="k-sem">semantic ${x.semantic} · spec score ${x.spec_score.toFixed(4)}</span>` : ""}
+      </div></div>`;
+  }).join("") : `<div class="result">No document contains any of these words.</div>`;
+}
+
+$("f").onsubmit = (e) => { e.preventDefault(); search(); };
+$("vers").ontoggle = () => { if ($("vers").open) loadVersions(); };
+loadHealth();
+const p0 = new URLSearchParams(location.search);
+document.querySelectorAll("[data-opt]").forEach(cb => { cb.checked = p0.get(cb.dataset.opt) === "1"; cb.onchange = () => search(); });
+if (p0.get("q")) { $("q").value = p0.get("q"); search(); }
+</script>
+</body>
+</html>

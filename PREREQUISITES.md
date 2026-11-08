@@ -43,13 +43,12 @@ bash ~/project_search_engine/code/tools/check_prereqs.sh node1     # or node2 / 
 | 🌐 Iceberg jar at `/opt/iceberg/` | team-run/01 §8 | the drivers read and write Iceberg |
 | 🌐 `~/nlp-venv`: Python 3.10 venv with `numpy==1.26.4` | team-run/01 §8b | NLP twist: `pyspark.ml` (Word2Vec) needs numpy on the driver |
 
-## Member 4: node4 (Search service + UI), 3 GB RAM
+## Member 4: node4 (Search service + UI), 2 GB RAM
 
 | What | How | Why |
 |---|---|---|
 | (No Spark needed.) Hadoop from "Everyone" #4 | course guide 05 | `hdfs dfs -get` pulls exports (client only) |
-| 🌐 `python3-venv` + `~/search-venv` with `requirements.txt` (FastAPI, uvicorn, pandas, pyarrow, numpy, fastembed) | team-run/05 M4-1 | the service; fastembed = MiniLM via ONNX Runtime, no PyTorch |
-| 🌐 the MiniLM model (~90 MB) | `~/search-venv/bin/python code/node4_search/semantic.py --download` | NLP twist: semantic rerank, offline on demo day |
+| 🌐 `python3-venv` + `~/search-venv` with `requirements.txt` (FastAPI, uvicorn, pandas, pyarrow, numpy) | team-run/05 M4-1 | the search service |
 | `/serving` owned by you | `sudo mkdir -p /serving && sudo chown $USER:$USER /serving` | where exported versions live |
 | a browser on node4 (or any team VM) | | the UI at `http://node4:8000` |
 

@@ -1,6 +1,6 @@
 """Query the running search service from a terminal, one line per result.
 
-    ~/search-venv/bin/python q.py "bubonic plague" [k] [--opts=stem,spell,expand,smart,rerank]
+    ~/search-venv/bin/python q.py "bubonic plague" [k] [--opts=stem,spell,expand,smart]
                                   [--service=http://localhost:8000]
 """
 import json
@@ -36,8 +36,7 @@ def main():
         print("  note: " + n)
     for r in d["results"]:
         print(f"  {r['rank']:>2}. {r['title'][:34]:<34} id={r['doc_id']:<15} score={r['score']:.3f}"
-              f"  bm25={r['bm25_norm']:.3f}  pr={r['pagerank_norm']:.3f}"
-              + (f"  sem={r['semantic']:.3f}" if "semantic" in r else ""))
+              f"  bm25={r['bm25_norm']:.3f}  pr={r['pagerank_norm']:.3f}")
         if r.get("marks"):
             print(f"      {r['snippet'][:150]}")
 

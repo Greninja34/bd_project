@@ -9,15 +9,15 @@ here. You pull exports from HDFS as a plain client, and switch versions only whe
 the two bugs in the course snippet and how we fixed them; the final score and its normalisation;
 why PageRank pushes "April" down to rank 5; how a version switch can't serve a broken or
 half-copied export. **NLP twists (you demo all of them):** stemming, edit-distance spelling
-correction, Word2Vec expansion with weights, query-aware snippets, sentence-embedding rerank.
+correction, Word2Vec expansion with weights, query-aware snippets.
 The code: [`app.py`](../code/node4_search/app.py), [`bm25.py`](../code/node4_search/bm25.py),
-[`nlp.py`](../code/node4_search/nlp.py), [`semantic.py`](../code/node4_search/semantic.py),
+[`nlp.py`](../code/node4_search/nlp.py),
 [`serving.py`](../code/node4_search/serving.py), [`pull_export.py`](../code/node4_search/pull_export.py),
 [`static/index.html`](../code/node4_search/static/index.html), and the tokenizer shared with Spark,
 [`common/textproc.py`](../code/common/textproc.py).
 
 Before you start: [`01-SETUP-ALL-MEMBERS.md`](01-SETUP-ALL-MEMBERS.md) §0–§6 and §9 on node4
-(§7–§8 are Spark/Iceberg: **not needed on node4**). Give the VM **3 GB** RAM (MiniLM needs ~500 MB).
+(§7–§8 are Spark/Iceberg: **not needed on node4**). Give the VM **2 GB** RAM.
 
 ---
 
@@ -27,21 +27,16 @@ Before you start: [`01-SETUP-ALL-MEMBERS.md`](01-SETUP-ALL-MEMBERS.md) §0–§6
 sudo apt install -y python3-venv
 python3 -m venv ~/search-venv
 ~/search-venv/bin/pip install -r ~/project_search_engine/code/node4_search/requirements.txt
-~/search-venv/bin/python -c "import fastapi, uvicorn, pandas, pyarrow, fastembed; print('deps ok')"
+~/search-venv/bin/python -c "import fastapi, uvicorn, pandas, pyarrow; print('deps ok')"
 sudo mkdir -p /serving && sudo chown "$USER":"$USER" /serving
 cd ~/project_search_engine/code/node4_search && ~/search-venv/bin/python bm25.py
-~/search-venv/bin/python semantic.py --download
 ```
 - A venv keeps FastAPI/pandas away from the system Python. We always call `~/search-venv/bin/python`
   explicitly, so there's no doubt which Python runs. (Node 4 can use Ubuntu's Python 3.12; the
   3.10 pin is only for PySpark.)
 - `bm25.py`'s self-test scores a 3-doc toy index. Doc 3 matches no query word, so it's **not** in the result (bug fix 2).
-- `fastembed` (NLP twist, semantic rerank) runs the MiniLM model with **ONNX Runtime**: no
-  PyTorch, ~50 MB of packages. `semantic.py --download` fetches the model (~90 MB) into
-  `~/.cache/fastembed` **now**, so on demo day it works with no internet.
 
-✅ `deps ok`, the self-test prints two dicts without an `AssertionError`, and
-`model sentence-transformers/all-MiniLM-L6-v2 ready in /home/<you>/.cache/fastembed`.
+✅ `deps ok`, and the self-test prints two dicts without an `AssertionError`.
 
 ## M4-2. HDFS client works  (after Member 2's M2-2)
 
@@ -86,19 +81,16 @@ ls -la /serving /serving/v0; cat /serving/CURRENT
 + hdfs dfs -test -e hdfs://node2:9000/search/exports/v0/_SUCCESS
 + hdfs dfs -get hdfs://node2:9000/search/exports/v0 /serving/.incoming-v0
 verified v0: 1000 docs, 233643 postings, 16/16 checks passed, docs snapshot <Phase 0 id>
-embeddings: 1000 docs embedded with sentence-transformers/all-MiniLM-L6-v2 in ~25s
 CURRENT: None -> v0
 service: {'switched': True, 'version': 'v0'}
 ```
 and terminal 1 prints `[serving] now serving v0 (1000 docs, loaded in ...s, nlp {'stem': True,
-'spell': True, 'expand': True, 'smart': True, 'rerank': True})`.
+'spell': True, 'expand': True, 'smart': True})`.
 
 What `pull_export.py` did, in order (each step can stop the switch):
 1. `_SUCCESS` exists in HDFS? It's the last file Member 3's export writes, so "no `_SUCCESS`" = not finished.
 2. `hdfs dfs -get` into `/serving/.incoming-v0` (a hidden name, so nothing loads it half-copied).
 3. Local verification: manifest status OK, all blocking checks OK, every file's size equals the manifest, Parquet row counts equal the manifest.
-   Then (NLP twist) it embeds every doc (title + start of the body) with MiniLM → `embeddings.npy`.
-   This runs **once per version, here**, not per query. If it fails, only `rerank=1` is off.
 4. Rename `.incoming-v0` → `v0` (atomic on one disk).
 5. `CURRENT` ← `v0` (written to a temp file, then renamed), then `POST /api/admin/reload`. The
    service loads **and verifies again** the complete new version *before* swapping it in under a
@@ -146,8 +138,7 @@ q phases 3;  q phases 3 --opts=stem
 q "bubnic plauge" 2;  q "bubnic plauge" 2 --opts=spell
 q river 3 --opts=expand;  q computer 3 --opts=expand;  q king 3 --opts=expand
 q "speed of light" 1;  q "speed of light" 1 --opts=smart
-q "disease spread by fleas" 6;  q "disease spread by fleas" 6 --opts=rerank
-q "disease spred by fleas" 3 --opts=stem,spell,expand,smart,rerank
+q "disease spred by fleas" 3 --opts=stem,spell,expand,smart
 ```
 (or the UI: `http://localhost:8000/?q=phases&stem=1` and so on; the checkboxes stay in the URL)
 
@@ -157,15 +148,13 @@ q "disease spred by fleas" 3 --opts=stem,spell,expand,smart,rerank
 | **did you mean** (always) / **auto-correct** `spell=1` | "bubnic plauge", "computr sciense" | 0 results + *Did you mean bubonic plague?* → with `spell=1`: Bubonic plague first | Norvig-style: all strings 1–2 edits away, keep those in the index vocabulary, pick the most frequent (highest df). Known words are never changed |
 | **Word2Vec expansion** `expand=1` | "river", "computer", "king" | chips *danube, yangtze* / *hardware, computers* / *queen, consort*; more matches | neighbours from Member 3's Spark MLlib model, added at weight 0.3 × similarity. "king" → *Queen* can move up: that's **query drift**, the price of recall |
 | **smart snippets** `smart=1` | "speed of light" | "*The biggest **speed** is the **speed** of **light**.*" instead of the article's first line | best sentence = most distinct query words; highlights by stem when stemming is on. The keyword tags (TF-IDF, from Spark) are always shown |
-| **semantic rerank** `rerank=1` | "disease spread by fleas", "animals that live in the sea" | *Flea* 6th → 2nd; *Fish* to 1st; a `semantic` score next to the spec score | the top 20 by the spec score get `0.5 · spec + 0.5 · cosine(query, doc)` with MiniLM sentence embeddings. Meaning, not just shared words |
 
-All on together: "disease spred by fleas" + all 5 boxes → *showing results for disease spread by
-fleas*, expanded with *fever, diseases, bite, flea*, then *Bubonic plague* and *Flea* on top with
-highlighted sentences, ~50 ms. 📸 screenshot the UI for 3 of these (before/after).
+All on together: "disease spred by fleas" + all 4 boxes → *showing results for disease spread by
+fleas*, plus Word2Vec expansion words, then *Bubonic plague* and *Flea* on top with
+highlighted sentences, ~30 ms. 📸 screenshot the UI for 3 of these (before/after).
 
 `curl -s localhost:8000/api/health` shows which twists the loaded version supports (`"nlp": {...}`).
-If one says `false`, its checkbox is greyed out: e.g. `rerank` if fastembed is missing,
-`expand` if Member 3 didn't run `word2vec.py`.
+If one says `false`, its checkbox is greyed out: e.g. `expand` if Member 3 didn't run `word2vec.py`.
 
 ---
 
@@ -226,8 +215,6 @@ Stop uvicorn (Ctrl+C), then `rm -rf /serving/* /serving/.[!.]*`, and start it ag
 |---|---|
 | `hdfs: command not found` | `source ~/.bashrc` (the Hadoop guide's PATH) |
 | `-get` hangs or `Connection refused node3:9866` | ufw on node2/node3 (setup §5), or that DataNode is down (`doctor.sh`) |
-| `embeddings: fastembed not installed` / `rerank: no embeddings` | `pip install -r requirements.txt` again (M4-1); then re-pull the version (`pull_export.py` embeds on pull) |
-| first rerank query is slow | MiniLM loads in the background at startup (~10 s); later queries take ~20 ms |
 | `service not reachable` in pull_export | uvicorn isn't running. Start it (M4-3); it loads `CURRENT` on startup |
 | `409 kept v0: ...` | the service refused the new version; the message says which check failed |
 | Can't use HDFS from node4 at all (last resort) | Member 3: `hdfs dfs -get /search/exports/v1 ~/v1 && scp -r ~/v1 <m4-user>@node4:~/incoming/` → you: `pull_export.py --version v1 --source ~/incoming` |
@@ -244,9 +231,5 @@ Stop uvicorn (Ctrl+C), then `rm -rf /serving/* /serving/.[!.]*`, and start it ag
 - *Repeated query words?* Counted once (`dict.fromkeys`), the usual BM25 practice.
 - *Why are the NLP twists off by default?* The spec fixes the ranking formula. With everything off
   we return exactly that; each twist is an add-on you can switch on and compare.
-- *Why rerank only the top 20?* Embedding similarity is good at meaning but bad at "must contain
-  this word"; BM25 finds the candidates, MiniLM reorders them. It also keeps a query at ~20 ms.
-- *Why fastembed and not an API?* Offline on demo day, no keys, no rate limits; ONNX Runtime avoids
-  PyTorch (~1–2 GB). The docs are embedded once per version, so a query costs one small embedding.
 - *Why does spell-correction use df?* Among candidates at the same edit distance, the more common
   word is the likelier intent, and it is guaranteed to have results.

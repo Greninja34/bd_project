@@ -7,7 +7,7 @@ Everything lives in `~/solo`, and `rm -rf ~/solo` removes it all.
 
 Needs: Java 11, Spark 3.3.4, Python 3.10 (all from the course guides), the Iceberg jar
 (setup §8), and, both needing internet once:
-- for the search part: the venv from M4-1 (`~/search-venv`, incl. fastembed + `semantic.py --download`);
+- for the search part: the venv from M4-1 (`~/search-venv`);
 - for the Word2Vec twist: the numpy venv from setup §8b (`~/nlp-venv`).
 
 ## S-1. A local config
@@ -61,15 +61,12 @@ SOLO=~/solo; cd ~/project_search_engine/code/node4_search
 ~/search-venv/bin/python pull_export.py --version v0 --source $SOLO/exports --serving $SOLO/serving --service ''
 SERVING_DIR=$SOLO/serving ~/search-venv/bin/uvicorn app:app --port 8000
 ```
-(`pull_export.py` also prints `embeddings: 1000 docs embedded ... in ~25s`.)
-```bash
-```
 Back in terminal 1 (or open `http://localhost:8000`):
 ```bash
 q() { ~/search-venv/bin/python ~/project_search_engine/code/node4_search/q.py "$@"; }
 q "bubonic plague"; q april 6; q "alan turing"
 q phases 3 --opts=stem; q "bubnic plauge" 2 --opts=spell; q river 3 --opts=expand
-q "speed of light" 1 --opts=smart; q "disease spread by fleas" 3 --opts=rerank
+q "speed of light" 1 --opts=smart
 ```
 ✅ Bubonic plague (100) first; for "april", April (1) is 5th (see M4-5 for why); Alan Turing (13) first.
 The NLP lines: 28 matches for "phases" (12 without stem) · *showing results for bubonic plague* ·

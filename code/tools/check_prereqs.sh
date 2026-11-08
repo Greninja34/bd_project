@@ -37,11 +37,9 @@ fi
 if [ "$NODE" = node4 ]; then
   echo "== node4: search service"
   chk "~/search-venv with the deps"   "~/search-venv/bin/python -c 'import fastapi, uvicorn, pandas, pyarrow'" "team-run/05 M4-1"
-  chk "fastembed (semantic rerank)"   "~/search-venv/bin/python -c 'import fastembed'"                        "team-run/05 M4-1 (optional twist)"
-  chk "MiniLM model downloaded"       "ls ~/.cache/fastembed | grep -qi minilm"                               "~/search-venv/bin/python code/node4_search/semantic.py --download"
   chk "/serving writable"             "[ -w /serving ]"                                                       "sudo mkdir -p /serving && sudo chown \$USER:\$USER /serving"
 fi
 
-echo "== RAM: $(free -g | awk '/Mem:/ {print $2}') GB (recommended: node1 3, node2 4, node3 4-6, node4 3)"
+echo "== RAM: $(free -g | awk '/Mem:/ {print $2}') GB (recommended: node1 3, node2 4, node3 4-6, node4 2)"
 [ $fail -eq 0 ] && echo "ALL GOOD for $NODE" || echo "$fail item(s) missing for $NODE"
 exit $fail

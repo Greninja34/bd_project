@@ -3,8 +3,8 @@
 A mini-Google across **4 VMs on ZeroTier**: documents are ingested, validated and versioned in
 **Apache Iceberg on HDFS** (replication 2), indexed and ranked with **Spark** (inverted index,
 PageRank), exported as validated Parquet, and served by a **FastAPI** search service whose score is
-`0.7 · BM25/max + 0.3 · PageRank/max`. On top of the spec: five optional NLP switches
-(stemming, did-you-mean, Word2Vec query expansion, smart snippets + keywords, MiniLM semantic rerank).
+`0.7 · BM25/max + 0.3 · PageRank/max`. On top of the spec: four optional NLP switches
+(stemming, did-you-mean, Word2Vec query expansion, smart snippets + keywords).
 
 | Node | Member | Runs |
 |---|---|---|
@@ -38,7 +38,7 @@ PageRank), exported as validated Parquet, and served by a **FastAPI** search ser
 | `code/node1_ingestion/` | `ingest.py`: parse, validate, dedupe, `MERGE INTO`, change detection from Iceberg snapshots |
 | `code/node2_storage/` | `lake_report.py`: tables, snapshots, history, tags, rejects, run log |
 | `code/node3_compute/` | `build_index.py`, `word2vec.py`, `pagerank.py`, `export.py` |
-| `code/node4_search/` | `app.py` (FastAPI), `bm25.py`, `nlp.py`, `semantic.py`, `pull_export.py`, `q.py`, `static/index.html` |
+| `code/node4_search/` | `app.py` (FastAPI), `bm25.py`, `nlp.py`, `pull_export.py`, `q.py`, `static/index.html` |
 | `code/tools/` | `doctor.sh` (network/daemons), `check_prereqs.sh`, `cluster_check.py`, `netmeter.sh` |
 | `data/` | `phase-0/pages.jsonl` (corpus), `phase-1/changes.json` (change set), `toy/` |
 | `team-run/` | the runbooks |

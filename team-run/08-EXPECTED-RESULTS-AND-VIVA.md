@@ -75,7 +75,6 @@ Query latency: 2–30 ms. Loading + verifying a version: ~0.1 s, ~30 MB in memor
 | Word2Vec: training time (local / 2-worker cluster) | 47 s / — | 42 s / 38 s |
 | Word2Vec neighbours (vary slightly per run) | king → queen, consort · planet → jupiter, saturn · river → danube, yangtze · computer → hardware, computers · disease → fever, diseases | king → queen, elizabeth · disease → diseases, infectious |
 | keywords (TF-IDF top 5) | e.g. Speed: speed, hour, units, velocity, average · Flea: flea, fleas, rat, oriental, plague | |
-| MiniLM embeddings at pull time | 1000 docs in ~25 s | 975 docs in ~24 s |
 | export size (all 4 Parquet sets) | ~4.7 MB | similar |
 | Porter stemmer check | 84/84 textbook cases; identical to NLTK's original Porter on all 33,968 corpus words longer than 2 letters | |
 
@@ -87,10 +86,8 @@ Query latency: 2–30 ms. Loading + verifying a version: ~0.1 s, ~30 MB in memor
 | river | `expand` | River · China · ... | + danube, yangtze; 94 matches |
 | king (v1 model) | `expand` | King · ... | + queen, elizabeth → **Queen first** (query drift) |
 | speed of light | `smart` | snippet = article start | "The biggest **speed** is the **speed** of **light**." |
-| disease spread by fleas | `rerank` | Bubonic plague · Diarrhea · Ebola virus · ... Flea 6th | Bubonic plague · **Flea** · Ebola virus |
-| animals that live in the sea | `rerank` | Animal · Fish · Antarctica | **Fish** · Animal · Antarctica |
 
-Query latency with every switch on: ~50 ms (rerank adds ~10–15 ms; MiniLM loads once at startup, ~10 s). Service memory with MiniLM: ~550 MB.
+Query latency with every switch on: ~30 ms.
 
 ### Time (measured on one laptop; expect 2–5× longer over ZeroTier)
 | job | local[4] | 2-worker cluster on one laptop |
@@ -132,7 +129,6 @@ Query latency with every switch on: ~50 ms (rerank adds ~10–15 ms; MiniLM load
 
 - **Stemming is optional** (`stem=1`), and the spec ranking uses exact words. Porter also over-stems sometimes ("university" and "universe" both → "univers").
 - **Word2Vec on 460 k tokens is small**: neighbours are topical rather than true synonyms (illness → pain, mental), and they change a little with each training run. Expansion can cause **query drift** ("king" → *Queen* first), which is why it's weighted (0.3 × similarity) and off by default.
-- **Semantic rerank only reorders BM25's top 20**: a doc with none of the query words can't be found by meaning alone. MiniLM sees only the title + first ~1500 characters of each doc.
 - **Spelling correction only touches words missing from the vocabulary**: a real but wrong word ("plant" for "planet") is not corrected.
 - **PageRank is almost binary on this data**, so 0.3 × PageRank works as a +0.255 bonus for having an in-link (that's why "april" ranks April 5th). This is the spec's formula.
   You might expect PageRank to barely change the ranking. It does change it, because of the max-normalisation.
@@ -190,7 +186,4 @@ Query latency with every switch on: ~50 ms (rerank adds ~10–15 ms; MiniLM load
 35. What is Word2Vec (skip-gram) learning? Which part runs on the workers and which on the driver? Why does only the driver need numpy?
 36. Why are expansion words weighted 0.3 × similarity, not 1? Show query drift with "king".
 37. What is TF-IDF, and why compute keywords in the export rather than the index job? *(df is global: a change anywhere changes every doc's keywords.)*
-38. Lexical (BM25) vs semantic (embeddings) search: what is each good and bad at? Why rerank instead of replacing BM25?
-39. Why are the docs embedded on node4 at pull time and not per query, or on the cluster?
-40. Why fastembed / ONNX instead of an API or PyTorch?
-41. Why do the NLP export checks only warn?
+38. Why do the NLP export checks only warn?

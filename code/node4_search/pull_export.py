@@ -7,8 +7,6 @@ Steps (any failure stops here, and the service keeps serving the version it alre
   1. is <source>/<version>/_SUCCESS there?        no  -> export not finished, stop
   2. copy the export to /serving/.incoming-<version>  (hdfs dfs -get: Node 4 is only an HDFS *client*)
   3. verify it locally: manifest status OK, every check passed, file sizes and row counts match
-  3b. (NLP twist) if fastembed is installed: embed every doc with MiniLM -> embeddings.npy
-      (~10 s; failure here only disables rerank=1, it never blocks the switch)
   4. rename .incoming-<version> -> <version>     (atomic on one filesystem)
   5. point /serving/CURRENT at <version>, then ask the service to reload
      if the service refuses it, CURRENT is put back to the previous version
@@ -39,7 +37,6 @@ def main():
     ap.add_argument("--source", required=True, help="hdfs://node2:9000/search/exports or a local folder")
     ap.add_argument("--serving", default=os.environ.get("SERVING_DIR", "/serving"))
     ap.add_argument("--service", default="http://localhost:8000", help="'' to skip the reload call")
-    ap.add_argument("--no-embed", action="store_true", help="skip the MiniLM embeddings (rerank=1 off)")
     args = ap.parse_args()
     os.environ["SERVING_DIR"] = args.serving
     import serving                                    # after SERVING_DIR is set
@@ -76,19 +73,6 @@ def main():
     print(f"verified {args.version}: {m['counts']['docs']} docs, {m['counts']['postings']} postings, "
           f"{sum(c['ok'] for c in m['checks'])}/{len(m['checks'])} checks passed, "
           f"docs snapshot {m['docs_snapshot_id']}")
-
-    # 3b. semantic embeddings (optional)
-    import semantic
-    if args.no_embed:
-        print("embeddings: skipped (--no-embed)")
-    elif not semantic.available():
-        print("embeddings: fastembed not installed -> rerank=1 unavailable for this version")
-    else:
-        try:
-            n, secs = semantic.embed_version(incoming)
-            print(f"embeddings: {n} docs embedded with {semantic.MODEL} in {secs}s")
-        except Exception as e:
-            print(f"embeddings: FAILED ({e}) -> rerank=1 unavailable for this version")
 
     # 4. publish locally
     if os.path.exists(final):

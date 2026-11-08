@@ -52,7 +52,6 @@
                border: 1px solid var(--line); margin: 2px 4px 2px 0; }
   .chip { color: var(--pr); } .kw { color: var(--muted); }
   mark { background: color-mix(in srgb, var(--pr) 30%, transparent); color: inherit; padding: 0 1px; border-radius: 3px; }
-  .k-sem { color: var(--ok); }
   code { font-size: 12px; }
 </style>
 </head>
@@ -72,7 +71,6 @@
     <label title="search the spelling correction"><input type="checkbox" data-opt="spell"> auto-correct</label>
     <label title="add Word2Vec neighbours at weight 0.3 x similarity"><input type="checkbox" data-opt="expand"> Word2Vec expansion</label>
     <label title="best-matching sentence with highlights"><input type="checkbox" data-opt="smart"> smart snippets</label>
-    <label title="re-rank the top 20 with MiniLM embeddings"><input type="checkbox" data-opt="rerank"> semantic rerank</label>
   </div>
   <div class="meta" id="meta">All extras off = the spec's ranking: 0.7 x BM25 / max BM25 + 0.3 x PageRank / max PageRank</div>
   <div id="notices"></div>
@@ -156,7 +154,6 @@ async function search(qOverride) {
         <span>score <b>${x.score.toFixed(4)}</b></span>
         <span class="k-bm">BM25 ${x.bm25} (${x.bm25_norm})</span>
         <span class="k-pr">PageRank ${x.pagerank.toExponential(3)} (${x.pagerank_norm})</span>
-        ${x.semantic !== undefined ? `<span class="k-sem">semantic ${x.semantic} · spec score ${x.spec_score.toFixed(4)}</span>` : ""}
       </div></div>`;
   }).join("") : `<div class="result">No document contains any of these words.</div>`;
 }

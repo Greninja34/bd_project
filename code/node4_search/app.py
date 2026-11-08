@@ -12,7 +12,6 @@ Endpoints
            &spell=1   search the "did you mean" correction instead of the typed words
            &expand=1  add Word2Vec neighbours of the query words, weight 0.3 x similarity
            &smart=1   query-aware snippet with highlighted words
-           &rerank=1  re-rank the top 20 with MiniLM sentence embeddings (needs fastembed)
     GET  /api/health             which version is loaded, doc count, which NLP features are available
     GET  /api/versions           every version in /serving and whether it is valid
     POST /api/admin/reload       re-read /serving/CURRENT and switch to it (if it is valid)
@@ -36,10 +35,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "common"))
 import textproc  # noqa: E402
 from bm25 import compute_bm25, final_scores  # noqa: E402
 import nlp  # noqa: E402
-import semantic  # noqa: E402
 import serving  # noqa: E402
-
-RERANK_TOP, RERANK_WEIGHT = 20, 0.5
 
 
 def _read(path, name):
@@ -68,20 +64,13 @@ class LoadedVersion:
         self.speller = nlp.Speller(df_by_term)
         syn = _read(path, "synonyms")
         self.expander = nlp.Expander(syn, df_by_term) if syn is not None else None
-        self.reranker, self.rerank_error = None, None
-        if os.path.exists(os.path.join(path, "embeddings.npy")):
-            try:
-                self.reranker = semantic.Reranker(path)
-            except Exception as e:
-                self.rerank_error = str(e)
         self.load_seconds = round(time.time() - t0, 2)
 
     def features(self):
         return {"stem": self.index_stem is not None, "spell": True, "expand": self.expander is not None,
-                "smart": "body" in self.docs.columns,
-                "rerank": self.reranker is not None and semantic.available()}
+                "smart": "body" in self.docs.columns}
 
-    def search(self, q, k, stem=False, spell=False, expand=False, smart=False, rerank=False):
+    def search(self, q, k, stem=False, spell=False, expand=False, smart=False):
         notes = []
         terms = textproc.tokenize(q)
         fixed, did_you_mean = self.speller.suggest(q)
@@ -109,28 +98,15 @@ class LoadedVersion:
         final = final_scores(bm, self.pagerank, self.max_pagerank, self.w_bm25, self.w_pr)
         max_bm = max(bm.values()) if bm else 1.0
         ranked = sorted(final.items(), key=lambda kv: (-kv[1], kv[0]))
-        sims = {}
-        if rerank:
-            if self.reranker and semantic.available():
-                head = ranked[:RERANK_TOP]
-                sims = self.reranker.similarities(q, [d for d, _ in head])
-                head = sorted(((d, (1 - RERANK_WEIGHT) * s + RERANK_WEIGHT * max(sims.get(d, 0.0), 0.0))
-                               for d, s in head), key=lambda kv: (-kv[1], kv[0]))
-                ranked = head + ranked[RERANK_TOP:]
-            else:
-                notes.append("rerank: no embeddings for this version or fastembed not installed")
         out = []
         for pos, (doc_id, score) in enumerate(ranked[:k], 1):
             d = self.docs.loc[doc_id]
             item = {"rank": pos, "doc_id": doc_id, "url": d["url"], "title": d["title"],
                     "snippet": d["snippet"], "marks": [], "score": round(score, 6),
-                    "spec_score": round(final[doc_id], 6),
                     "bm25": round(bm[doc_id], 4), "bm25_norm": round(bm[doc_id] / max_bm, 4),
                     "pagerank": round(float(d["pagerank"]), 8),
                     "pagerank_norm": round(float(d["pagerank"]) / self.max_pagerank, 4),
                     "keywords": list(d["keywords"]) if "keywords" in d and d["keywords"] is not None else []}
-            if doc_id in sims:
-                item["semantic"] = round(sims[doc_id], 4)
             if smart and "body" in d:
                 item["snippet"], item["marks"] = nlp.smart_snippet(d["body"], set(weights), stem and self.index_stem is not None)
             out.append(item)
@@ -168,8 +144,6 @@ def _startup():
             _switch(name)
         except Exception as e:
             print(f"[serving] startup: {e}", flush=True)
-    if semantic.available():          # load MiniLM in the background so the first rerank is fast
-        threading.Thread(target=semantic.model, daemon=True).start()
 
 
 def _need():
@@ -182,12 +156,12 @@ def _need():
 @app.get("/api/search")
 def search(q: str = Query(..., min_length=1), k: int = Query(10, ge=1, le=100),
            stem: bool = False, spell: bool = False, expand: bool = False,
-           smart: bool = False, rerank: bool = False):
+           smart: bool = False):
     cur = _need()
     t0 = time.time()
-    res = cur.search(q, k, stem=stem, spell=spell, expand=expand, smart=smart, rerank=rerank)
+    res = cur.search(q, k, stem=stem, spell=spell, expand=expand, smart=smart)
     res.update({"query": q, "version": cur.name, "took_ms": round((time.time() - t0) * 1000, 1),
-                "options": {"stem": stem, "spell": spell, "expand": expand, "smart": smart, "rerank": rerank}})
+                "options": {"stem": stem, "spell": spell, "expand": expand, "smart": smart}})
     return res
 
 

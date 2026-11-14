@@ -13,6 +13,7 @@ Clean up afterwards with --drop.
 import os
 import socket
 import sys
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
 import lake  # noqa: E402
@@ -21,6 +22,7 @@ import lake  # noqa: E402
 def where(_):
     import platform
     import textproc                                  # proves addPyFile reached this executor
+    time.sleep(0.3)                                  # keep tasks alive so they spread over all executors
     return (os.environ.get("SPARK_LOCAL_HOSTNAME") or socket.gethostname(),
             platform.python_version(), textproc.tokenize("Hello World")[0])
 
@@ -34,6 +36,12 @@ def main():
         print("dropped iceberg_catalog.check.hello")
         return
     print(f"\n[check] driver on {me}, master {sc.master}, default parallelism {sc.defaultParallelism}")
+    # Executors start one by one; the one next to the driver is usually first and would otherwise
+    # finish all the tiny tasks before the other worker's executor has registered.
+    for _ in range(40):
+        if sc._jsc.sc().getExecutorMemoryStatus().size() >= 3:     # driver + 2 executors
+            break
+        time.sleep(1)
     seen = sorted(set(sc.parallelize(range(32), 8).map(where).collect()))
     for host, py, tok in seen:
         print(f"[check] task ran on {host:<10} python {py}  textproc ok ({tok})")

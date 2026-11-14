@@ -108,7 +108,7 @@ Point at: **13 × PASS**, `EXPORT v0: OK`. Say: written to a temp folder, `_SUCC
 ---
 
 ## D04 · Search the original corpus (5, 6) (RUNBOOK S37-S38) — node4 only
-Who: Member 4 (you). Waits for "v0 exported".
+Who: Member 4. Waits for "v0 exported".
 
 **▶ node4 · terminal B** (terminal A keeps the service running)
 ```bash
@@ -180,7 +180,7 @@ Point at: "Iceberg says 100 docs changed", **`mode: incremental`** (only those d
 ---
 
 ## D08 · The search follows the change (6) (RUNBOOK S48) — node4 only
-Who: Member 4 (you). Waits for "v1 exported".
+Who: Member 4. Waits for "v1 exported".
 
 **▶ node4 · terminal B** (still v0)
 ```bash
@@ -241,7 +241,7 @@ Point at: `Lost executor`, `ExecutorLostFailure`, `FetchFailed` in the log, the 
 ---
 
 ## D11 · A broken export never reaches the search (RUNBOOK S54-S55) — node3, then node4
-Who: Member 3, then Member 4 (you).
+Who: Member 3, then Member 4.
 
 **▶ node3 · terminal 1**
 ```bash
@@ -261,7 +261,7 @@ Point at: `REFUSED ... Still serving v1`, `exit code 1`, health still `"version"
 ---
 
 ## D12 · Switch versions back and forth (RUNBOOK S56) — node4 only
-Who: Member 4 (you).
+Who: Member 4.
 
 **▶ node4 · terminal B**
 ```bash
@@ -351,4 +351,4 @@ Then open `http://node3:18080` → the application → *Stages*. Say: the data i
 
 Time: D01-D13 about 30 min. Cut D14-D15 first if short, never D02-D13.
 After the demo: shut down in the RUNBOOK order (S67-S70: node4, then node3, then node2).
-Each member must be able to explain their steps: [VIVA.md](VIVA.md) section 7. Likely first question to M4 (D04, D08, D11, D12): BM25 with k1 = 1.2, b = 0.75, the two bugs in the course snippet, the final-score normalisation, and why a version switch can't serve a broken export.
+Each member must be able to explain their steps: [VIVA.md](VIVA.md) section 7. Likely first question to Member 4 (D04, D08, D11, D12): BM25 with k1 = 1.2, b = 0.75, the two bugs in the course snippet, the final-score normalisation, and why a version switch can't serve a broken export.

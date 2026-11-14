@@ -2,7 +2,7 @@
 plain Parquet export that pull_export.py placed in <serving dir>/<version>/.
 
     cd code/node4_search
-    bd serve          (runs: uvicorn app:app --host 0.0.0.0 --port 8000 in this folder)
+    uvicorn app:app --host 0.0.0.0 --port 8000
 
 Endpoints
     GET  /                       the search UI (static/index.html)
@@ -107,7 +107,7 @@ def _switch(name):
 def _need():
     cur = _state["current"]
     if cur is None:
-        raise HTTPException(503, f"no version loaded yet ({_state['last_error'] or 'run bd pull vN'})")
+        raise HTTPException(503, f"no version loaded yet ({_state['last_error'] or 'run pull_export.py'})")
     return cur
 
 

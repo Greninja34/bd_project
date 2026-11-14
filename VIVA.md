@@ -97,9 +97,9 @@ Query latency: 2–30 ms. Loading + verifying a version: ~0.1 s, a few tens of M
 | Duplicates with no `version` field | highest `version` wins if present, otherwise **the last copy in the file** wins. The loser goes to `rejects` as `duplicate_superseded` ("identical copy" or "different content") | |
 | Missing `links` key (20 docs) | **kept, with `links = []`** (only `doc_id, url, title, text` are required) → 1,000 docs | `ingest --missing-links reject` → 980 docs |
 | Rejected records | stored in Iceberg `search.rejects` with phase, line number and reason; counts printed | |
-| `changes.json` vs `changes.jsonl` | `bd ingest 1` uploads it to HDFS **as `changes.jsonl`** | |
+| `changes.json` vs `changes.jsonl` | the `hdfs dfs -put` of Phase 1 stores it in HDFS **as `changes.jsonl`** | |
 | DELETE carrying a body | only `doc_id` is used; the body is ignored | |
-| Phase 1: recompute or incremental? | **incremental** index: Iceberg tells which docs changed between two snapshots; only those are re-indexed. PageRank is recomputed (it is global) | `bd index 1 --full` |
+| Phase 1: recompute or incremental? | **incremental** index: Iceberg tells which docs changed between two snapshots; only those are re-indexed. PageRank is recomputed (it is global) | `build_index.py --phase 1 --full` |
 | PageRank graph | only the `links` field, cleaned (both ends must exist) | |
 | PageRank details | start at 1/N, dangling rank spread evenly, **exactly 10** iterations | `pagerank.py --iterations N` (N ≥ 10) |
 | BM25 snippet bugs | both fixed (length lookup; only matching docs are scored) | |
@@ -111,7 +111,7 @@ Query latency: 2–30 ms. Loading + verifying a version: ~0.1 s, a few tens of M
 
 - **Iceberg Hadoop catalog on HDFS:** the course setup; no metastore service to run.
 - **One generated `spark-defaults.conf`** per node (`state/conf/spark`), so every job on every node has the same settings and `spark-submit file.py` needs no flags.
-- **Spark ports pinned** (driver 40000/40001, block managers 40010+, worker 40020) and the driver advertises the node's ZeroTier IP: the firewall list is exact and `bd netcheck` can test it.
+- **Spark ports pinned** (driver 40000/40001, block managers 40010+, worker 40020) and the driver advertises the node's ZeroTier IP: the firewall list is exact and the `nc` port test can check it.
 - **HDFS URIs use the name `node2`:** Iceberg stores absolute paths in table metadata. If an IP changes, only `/etc/hosts` changes.
 - **Hash before MERGE:** re-runs are no-ops (no empty snapshots), so idempotency is visible.
 - **Change detection by snapshot diff:** the spec's "detect changes from Iceberg". Works after a rollback too.

@@ -1,8 +1,7 @@
 """Node 3 - validate everything, then export plain Parquet for the search service on Node 4.
 
-    bd export v0 --phase 0          (node3)
-  which runs:
-    spark-submit code/node3_compute/export.py --version v0 --export-root hdfs://node2:9000/search/exports
+  node3:
+    spark-submit code/node3_compute/export.py --version v0 --export-root hdfs://node2:9000/search/exports --phase 0
 
 Writes, in HDFS:
     <root>/<version>/docs/      Parquet: doc_id, url, title, length, pagerank, snippet

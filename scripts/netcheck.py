@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""bd netcheck - can the 4 nodes really reach each other on the ports the cluster needs?
+"""netcheck.py (OPTIONAL diagnostic, not part of the main flow) - can the 4 nodes really reach each other on the ports the cluster needs?
 
-Run it on ALL 4 nodes at the same time (about 2 minutes, `--seconds N` to change).
+Run `python3 scripts/netcheck.py` on ALL 4 nodes at the same time (about 2 minutes, `--seconds N`).
 Each node
   1. opens throwaway listeners on the ports its role must ACCEPT (ports already held by a real
      daemon are skipped: if a probe connects, the daemon is reachable too),
@@ -33,10 +33,10 @@ MY_IP = ""            # set in main(): probes leave from the team IP, so peers s
 
 
 def load_team():
-    """IPs from the environment (set by bd), else straight from team.env."""
+    """IPs from the environment (set by env.sh), else straight from team.env."""
     ips = {n: os.environ.get(f"NODE{n[-1]}_IP", "") for n in NODES}
     if not all(ips.values()):
-        path = os.environ.get("BD_TEAM_ENV") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "team.env")
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "team.env")
         for line in open(path):
             k, _, v = line.strip().partition("=")
             if k.startswith("NODE") and k.endswith("_IP") and v:
@@ -122,9 +122,9 @@ def main():
     args = ap.parse_args()
 
     ips = load_team()
-    me = os.environ.get("BD_NODE", "")
+    me = os.environ.get("NODE_NAME", "")
     if me not in NODES:
-        sys.exit("netcheck: node not detected (run it through `bd netcheck`)")
+        sys.exit("netcheck: node not detected. Activate the venv first (source ~/bd_project/venv/bin/activate)")
     global MY_IP
     my_ip = MY_IP = ips[me]
     peers = [n for n in NODES if n != me]
@@ -136,7 +136,7 @@ def main():
         sys.exit(f"netcheck: cannot listen on {my_ip}: {e}")
     print(f"[netcheck] {me} {my_ip}: listening on {len(lis.socks) - 1} ports + bulk {BULK_PORT}"
           + (f"; already in use by a daemon, skipped: {lis.in_use}" if lis.in_use else ""))
-    print(f"[netcheck] now start `bd netcheck` on the other nodes too. Up to {args.seconds} s.")
+    print(f"[netcheck] now start `python3 scripts/netcheck.py` on the other nodes too. Up to {args.seconds} s.")
 
     ok = {(n, p): False for n in peers for p in PORTS[n]}
     speed = {n: None for n in peers}
@@ -190,15 +190,15 @@ def main():
         failed = [p for p in PORTS[n] if not ok[(n, p)]]
         bad |= bool(failed) or speed[n] is None
         if len(failed) == len(PORTS[n]):
-            print(f"  ❌ {n}: nothing answers. Is {n} running `bd netcheck`? ping {ips[n]}? "
+            print(f"  ❌ {n}: nothing answers. Is {n} running netcheck.py? ping {ips[n]}? "
                   f"ZeroTier authorized? ufw on {n}? (TROUBLESHOOTING.md#ping, #ufw)")
         elif failed:
-            print(f"  ❌ {n}: ports {failed} blocked or not open. Most likely ufw on {n} (bd setup there), "
+            print(f"  ❌ {n}: ports {failed} blocked or not open. Most likely ufw on {n} (RUNBOOK Part 0, ufw step, there), "
                   f"or {n} is not running netcheck yet. (TROUBLESHOOTING.md#ufw)"
                   + (" If node3 is WSL2: ZeroTier must run INSIDE WSL (TROUBLESHOOTING.md#wsl2)." if n == "node3" else ""))
         if not failed and speed[n] is None:
             print(f"  ❌ {n}: small connections work but the bulk transfer stalls: an MTU / relay problem. "
-                  f"Set ZT_MTU=1400 in team.env, run `bd setup` on every node, run netcheck again. (TROUBLESHOOTING.md#mtu)")
+                  f"Set ZT_MTU=1400 in team.env, redo the MTU step of the RUNBOOK on every node, run netcheck again. (TROUBLESHOOTING.md#mtu)")
     for n in peers:
         missing = need_in - heard.get(n, set()) - ({BULK_PORT} if n in bulk_in else set())
         if missing and len(missing) != 0 and all(ok[(n, p)] for p in PORTS[n]) and speed[n] is not None:

@@ -1,6 +1,6 @@
 """Node 4 - pull a finished export from HDFS into the serving dir and switch the service to it.
 
-    bd pull v0          (runs: python pull_export.py --version v0 --source hdfs://node2:9000/search/exports)
+    python code/node4_search/pull_export.py --version v0 --source hdfs://node2:9000/search/exports
 
 Steps (any failure stops here, and the service keeps serving the version it already has):
   1. is <source>/<version>/_SUCCESS there?        no  -> export not finished, stop

@@ -1,8 +1,6 @@
 """Node 1 - ingestion + validation job.  Reads one phase's input from HDFS, merges it into Iceberg.
 
-    bd ingest 0          (node1; does the hdfs put, then runs this job)
-    bd ingest 1
-  which runs:
+  node1: first hdfs dfs -put the input file, then:
     spark-submit code/node1_ingestion/ingest.py --phase 0 --input hdfs://node2:9000/search/input/phase-0/pages.jsonl
 
 What it does, in order (each step is a block below):

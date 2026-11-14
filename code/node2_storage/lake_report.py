@@ -1,6 +1,6 @@
 """Node 2 - one-screen report of the lakehouse: every table, its row count and snapshots.
 
-    bd report          (runs: spark-submit code/node2_storage/lake_report.py)
+    spark-submit code/node2_storage/lake_report.py
 
 Read-only. Good for screenshots after each phase, and for checking idempotency
 (run it, re-run an ingestion, run it again: docs/links/rejects must show the same snapshot ids).

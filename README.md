@@ -15,17 +15,19 @@ Pinned versions: Ubuntu 24.04, Java 11, Hadoop 3.3.6, Spark 3.3.4 (Python 3.10),
 
 ```bash
 git clone https://github.com/Greninja34/bd_project.git ~/bd_project
-bash ~/bd_project/bd setup
-source ~/bd_project/venv/bin/activate
-bd help
 ```
-`bd help` shows only the commands for your node, in order. The IPs of the four nodes are in [`team.env`](team.env).
+Then follow [RUNBOOK.md](RUNBOOK.md) Part 0 (hosts, firewall, configs, venv: every step is a plain command with an explanation), and your member's section. Every later terminal starts with:
+```bash
+source ~/bd_project/venv/bin/activate
+cd ~/bd_project
+```
+There is no wrapper program: you type the real `hdfs`, `spark-submit`, `spark-sql` and `uvicorn` commands. The IPs of the four nodes are in [`team.env`](team.env).
 
 ## The docs
 
 | File | What |
 |---|---|
-| [RUNBOOK.md](RUNBOOK.md) | **The guide.** Numbered steps: who, what to run, what you must see |
+| [RUNBOOK.md](RUNBOOK.md) | **The guide.** Setup, then one section per member with numbered tasks: the real commands, what they do, what you must see |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | By symptom or error text: cause and exact fix. Includes node3 on WSL2 |
 | [VIVA.md](VIVA.md) | Expected numbers, design decisions, limitations, what each member must explain, viva questions |
 
@@ -33,7 +35,7 @@ bd help
 
 | Path | Contents |
 |---|---|
-| `bd`, `scripts/` | the one command and what it runs (`setup`, `doctor`, `netcheck`, `start`, `status`, ...) |
+| `scripts/` | `env.sh` (loaded by `activate`: node detection, config dirs) and `netcheck.py` (optional port/bandwidth diagnostic) |
 | `team.env` | the one team settings file (ZeroTier IPs) |
 | `code/common/` | `textproc.py` (wiki markup to terms), `lake.py` (Iceberg helpers) |
 | `code/node1_ingestion/` | `ingest.py`: parse, validate, dedupe, `MERGE INTO`, change detection from Iceberg snapshots |
@@ -42,9 +44,9 @@ bd help
 | `code/node4_search/` | `app.py` (FastAPI), `bm25.py`, `pull_export.py`, `q.py`, `static/index.html` |
 | `code/tools/` | `cluster_check.py` |
 | `data/` | `phase-0/pages.jsonl`, `phase-1/changes.json`, `toy/` |
-| `venv/`, `state/` | created by `bd setup`, not in git (configs, HDFS data, logs, jars, serving folder) |
+| `venv/`, `state/` | created by the RUNBOOK Part 0 steps, not in git (configs, HDFS data, logs, jars, serving folder) |
 
 ## Status
 
 <!-- TEST-STATUS -->
-Tested end to end on a 4-container podman cluster (4 users, NAT + overlay networks, real HDFS + Spark standalone + Iceberg): both phases, every demo, and a blocked node2->node3 port (the WSL2 failure) caught by `bd netcheck` and `bd check`. **Not yet run on the 4 real machines**: real ZeroTier, ufw and WSL2 are verified by `bd netcheck` (RUNBOOK step B2).
+Tested end to end on a 4-container podman cluster (4 users, NAT + overlay networks, real HDFS + Spark standalone + Iceberg): both phases, every demo, and a blocked node2->node3 port (the WSL2 failure) caught by the `nc` port test and the cluster_check. **Not yet run on the 4 real machines**: real ZeroTier, ufw and WSL2 are verified by the `nc` port test (RUNBOOK P0-12). Note: the RUNBOOK now lists the plain commands that an earlier wrapper script ran; only the wrapper-free form (Part 0 heredocs, hand-started daemons) has not been executed yet.

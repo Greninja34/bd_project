@@ -1,54 +1,48 @@
 #!/usr/bin/env bash
-# Environment for this project. Sourced by venv/bin/activate (setup adds that line) and by `bd`.
-# Safe to source twice. Not for `set -e`/`set -u` callers to worry about: every step is guarded.
-# It never changes the course's own config in /opt/hadoop/etc/hadoop or $SPARK_HOME/conf:
-# it only points HADOOP_CONF_DIR / SPARK_CONF_DIR at our own copies in state/conf.
+# The ONLY thing `source ~/bd_project/venv/bin/activate` loads (one line at the end of venv/bin/activate).
+# It finds out which node this machine is and points Hadoop/Spark at our own config in state/conf/.
+# Sourced into your shell: no `set -e`, every step is guarded. Safe to source twice.
+# The course's own config in /opt/hadoop/etc/hadoop and $SPARK_HOME/conf is never touched.
 
-BD_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-export BD_HOME
-# shellcheck source=lib.sh
-. "$BD_HOME/scripts/lib.sh"
+PROJECT_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+STATE_DIR="$PROJECT_HOME/state"
+export PROJECT_HOME STATE_DIR
 
-# Where the course installed things (only used when your shell did not set them).
+# 1. Where the course installed things (only if your shell did not already set them)
 if [ -z "${JAVA_HOME:-}" ] && [ -d /usr/lib/jvm/java-11-openjdk-amd64 ]; then export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64; fi
 if [ -z "${HADOOP_HOME:-}" ] && [ -d /opt/hadoop ]; then export HADOOP_HOME=/opt/hadoop; fi
 if [ -z "${SPARK_HOME:-}" ]  && [ -d /opt/spark ];  then export SPARK_HOME=/opt/spark; fi
-for _d in "${HADOOP_HOME:-}/bin" "${SPARK_HOME:-}/bin" "${SPARK_HOME:-}/sbin" "${JAVA_HOME:+$JAVA_HOME/bin}"; do
+for _d in "${HADOOP_HOME:-}/bin" "${SPARK_HOME:-}/bin" "${SPARK_HOME:-}/sbin"; do
   case ":$PATH:" in *":$_d:"*) ;; *) [ -d "$_d" ] && PATH="$PATH:$_d" ;; esac
 done
 unset _d
-case ":$PATH:" in *":$BD_HOME:"*) ;; *) PATH="$BD_HOME:$PATH" ;; esac
 
-# Leftovers from an old terminal (solo practice exported SPARK_LOCAL_IP=127.0.0.1) must not leak in.
+# 2. Leftovers from old guides (solo practice exported these) must not leak in
 unset SPARK_LOCAL_IP SPARK_LOCAL_HOSTNAME SPARK_MASTER_HOST
 
-bd_load_team || true
-bd_detect_node || true
+# 3. team.env: the four ZeroTier IPs
+if [ -f "$PROJECT_HOME/team.env" ]; then set -a; . "$PROJECT_HOME/team.env"; set +a; fi
 
-export BD_STATE="$BD_HOME/state"
-if [ -n "${BD_NODE:-}" ]; then
-  export HADOOP_CONF_DIR="$BD_STATE/conf/hadoop"
-  export HADOOP_LOG_DIR="$BD_STATE/logs/hadoop"
-  export HADOOP_PID_DIR="$BD_STATE/pids/hadoop"
-  export SERVING_DIR="$BD_STATE/serving"
-  case "$BD_NODE" in
-    node4) ;;
-    *)
-      export SPARK_CONF_DIR="$BD_STATE/conf/spark"
-      export SPARK_LOG_DIR="$BD_STATE/logs/spark"
-      export SPARK_PID_DIR="$BD_STATE/pids/spark"
-      export SPARK_LOCAL_IP="$MY_IP"
-      ;;
-  esac
-  # prompt tag, once, only in interactive shells
-  case "${PS1:-}" in ""|*"(bd "*) ;; *) PS1="(bd $BD_NODE) $PS1" ;; esac
-  # export the team IPs for Python tools (cluster_check, netcheck)
-  export NODE1_IP NODE2_IP NODE3_IP NODE4_IP
-fi
+# 4. Which node am I? The one whose IP is on ANY interface of this machine
+unset NODE_NAME MY_IP
+_addrs="$(ip -4 -o addr show 2>/dev/null | awk '{split($4,a,"/"); print a[1]}')"
+for _i in 1 2 3 4; do
+  eval "_ip=\${NODE${_i}_IP:-}"
+  if [ -n "$_ip" ] && printf '%s\n' "$_addrs" | grep -qx "$_ip"; then NODE_NAME="node$_i"; MY_IP="$_ip"; fi
+done
+unset _addrs _i _ip
+export NODE_NAME MY_IP
 
-# In your own shell the helper functions are not needed: keep the namespace clean.
-# (bd and the scripts set BD_SCRIPT=1 and keep them.)
-if [ -z "${BD_SCRIPT:-}" ]; then
-  # shellcheck disable=SC2086
-  unset -f $bd_lib_funcs 2>/dev/null || true
+# 5. Our own config, logs and pids under state/ (only once the config has been written)
+if [ -n "${NODE_NAME:-}" ]; then
+  export SERVING_DIR="$STATE_DIR/serving"
+  export HADOOP_LOG_DIR="$STATE_DIR/logs/hadoop" HADOOP_PID_DIR="$STATE_DIR/pids/hadoop"
+  [ -d "$STATE_DIR/conf/hadoop" ] && export HADOOP_CONF_DIR="$STATE_DIR/conf/hadoop"
+  if [ "$NODE_NAME" != node4 ]; then
+    export SPARK_LOG_DIR="$STATE_DIR/logs/spark" SPARK_PID_DIR="$STATE_DIR/pids/spark" SPARK_LOCAL_IP="$MY_IP"
+    [ -d "$STATE_DIR/conf/spark" ] && export SPARK_CONF_DIR="$STATE_DIR/conf/spark"
+  fi
+  case "${PS1:-}" in ""|*"(node"*) ;; *) PS1="($NODE_NAME) $PS1" ;; esac
+elif [ -n "${PS1:-}" ]; then
+  echo "env.sh: none of the team.env IPs is on this machine (ip -4 -br a). Is ZeroTier up and authorized?" >&2
 fi

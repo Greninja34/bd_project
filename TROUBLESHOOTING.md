@@ -1,22 +1,22 @@
 # TROUBLESHOOTING
 
 Find your symptom (the exact error text, or what you see). Each entry: **cause**, then the commands.
-First two commands for almost everything: `bd doctor` and `bd logs`.
+First commands for almost everything: `jps` (which daemons run), `ss -tlnp` (which ports listen), `tail -30 ~/bd_project/state/logs/<name>.log` (the job or daemon log), and the [log pattern table](#log-patterns). The checks are in RUNBOOK P0-13.
 
-Contents: [path / venv](#path-venv) · [ZeroTier IP not found](#zt-ip) · [ping](#ping) · [duplicate node IDs](#dup-id) · [MTU / RELAY](#mtu) · [ufw](#ufw) · [sudo host](#sudo-host) · [old daemons](#old-daemons) · [port in use](#port-in-use) · [clusterID](#clusterid) · [safe mode](#safemode) · [minReplication](#minreplication) · [DataNode wrong IP](#dn-ip) · [refused :9000](#refused-9000) · [Permission denied](#permission) · [no resources](#no-resources) · [only one worker](#one-worker) · [Python versions](#py-version) · [python3.10 missing](#py-missing) · [Table not found](#table-not-found) · [ClassNotFound iceberg](#iceberg-class) · [stale export](#stale-export) · [already exists](#exists) · [solo leftovers](#solo-leftover) · [node3 on WSL2](#wsl2) · [not tested](#not-tested)
+Contents: [path / venv](#path-venv) · [ZeroTier IP not found](#zt-ip) · [ping](#ping) · [duplicate node IDs](#dup-id) · [MTU / RELAY](#mtu) · [ufw](#ufw) · [sudo host](#sudo-host) · [old daemons](#old-daemons) · [port in use](#port-in-use) · [clusterID](#clusterid) · [safe mode](#safemode) · [minReplication](#minreplication) · [DataNode wrong IP](#dn-ip) · [refused :9000](#refused-9000) · [Permission denied](#permission) · [no resources](#no-resources) · [only one worker](#one-worker) · [Python versions](#py-version) · [python3.10 missing](#py-missing) · [Table not found](#table-not-found) · [ClassNotFound iceberg](#iceberg-class) · [stale export](#stale-export) · [already exists](#exists) · [solo leftovers](#solo-leftover) · [node3 on WSL2](#wsl2) · [log patterns](#log-patterns) · [not tested](#not-tested)
 
 ---
 
 <a id="path-venv"></a>
-## `No such file or directory` for a script, `bd: command not found`, `ModuleNotFoundError: fastapi`, pip fails
+## `No such file or directory` for a script, `ModuleNotFoundError: fastapi`, pip fails
 
 **Cause:** the repo is not where you think, you did not activate the venv, or the node4 dependencies are not installed.
 ```bash
 ls ~/bd_project/bd                                   # clone: git clone https://github.com/Greninja34/bd_project.git ~/bd_project
-source ~/bd_project/venv/bin/activate                # in EVERY new terminal; prompt shows (bd nodeN)
-bash ~/bd_project/bd setup                           # creates the venv, installs node4 deps
+source ~/bd_project/venv/bin/activate                # in EVERY new terminal; prompt shows (nodeN)
+# no venv yet: RUNBOOK P0-4 (creates the venv, installs the node4 deps)
 ```
-node4: `python3 -m venv` failing means `sudo apt install -y python3-venv`, then `bd setup` again. `pip` failing means no internet: run `bd setup` when online. Test: `~/bd_project/venv/bin/python -c "import fastapi, uvicorn, pandas, pyarrow"`.
+node4: `python3 -m venv` failing means `sudo apt install -y python3-venv`, then redo RUNBOOK P0-4. `pip` failing means no internet: redo P0-4 when online. Test: `~/bd_project/venv/bin/python -c "import fastapi, uvicorn, pandas, pyarrow"`.
 `No space left on device`: `df -h`.
 
 <a id="zt-ip"></a>
@@ -32,12 +32,12 @@ cat ~/bd_project/team.env                            # same file on every node? 
 In ZeroTier Central the member needs its IP set by hand and "Auth" ticked. On WSL2 see [node3 on WSL2](#wsl2).
 
 <a id="ping"></a>
-## `ping node2` fails / `nothing answers` in netcheck
+## `ping node2` fails / `nothing answers` in netcheck.py
 
 **Cause:** ZeroTier not joined or not authorized, wrong `/etc/hosts`, or the other node is off.
 ```bash
 sudo zerotier-cli listnetworks                       # OK?
-ping -c2 172.23.194.191                              # by IP: works? then /etc/hosts is wrong -> bd setup
+ping -c2 172.23.194.191                              # by IP: works? then /etc/hosts is wrong -> RUNBOOK P0-5
 getent hosts node2                                   # must print node2's ZeroTier IP
 sudo zerotier-cli peers | grep LEAF                  # UDP 9993 must not be blocked by your network
 ```
@@ -45,7 +45,7 @@ sudo zerotier-cli peers | grep LEAF                  # UDP 9993 must not be bloc
 <a id="dup-id"></a>
 ## Two machines have the same ZeroTier node ID (cloned VMs)
 
-**Cause:** a VM cloned from another one copied `/var/lib/zerotier-one/identity.*`. Both machines fight over one identity: random timeouts, wrong IPs. `bd doctor` prints the 10-digit node ID of each machine; compare them in the group chat.
+**Cause:** a VM cloned from another one copied `/var/lib/zerotier-one/identity.*`. Both machines fight over one identity: random timeouts, wrong IPs. `sudo zerotier-cli info` prints the 10-digit node ID of each machine; compare them in the group chat.
 On the clone:
 ```bash
 sudo systemctl stop zerotier-one
@@ -54,7 +54,7 @@ sudo systemctl start zerotier-one
 sudo zerotier-cli info                               # new ID
 sudo zerotier-cli join <network id>
 ```
-Then authorize the new member in Central, set its IP by hand, delete the old duplicate member, `bd setup`.
+Then authorize the new member in Central, set its IP by hand, delete the old duplicate member, then check `ip -4 -br a`.
 
 <a id="mtu"></a>
 ## Pings work but HDFS/Spark hang; `bulk transfer stalls`; `peers` shows RELAY
@@ -64,59 +64,67 @@ Then authorize the new member in Central, set its IP by hand, delete the old dup
 sudo zerotier-cli peers | grep LEAF                  # DIRECT is good, RELAY is slow
 ip link show | grep -A1 zt                           # current mtu
 ```
-Fix: put `ZT_MTU=1400` in `team.env`, push, everyone `git pull` and `bd setup` (sets the interface MTU; run `bd setup` again after a reboot). Then `bd netcheck` on all 4 again.
+Fix: on **every** node set the interface MTU (RUNBOOK P0-7: `sudo ip link set dev $ZT_IF mtu 1400`; run it again after a reboot). Then test again with `python3 scripts/netcheck.py` on all 4 nodes at the same time (optional diagnostic: opens test listeners on every port, probes the other nodes and sends 20 MB to each; it ends with a matrix and a hint per failure).
 Still RELAY: another network or a phone hotspot usually gives DIRECT. The university wifi often blocks UDP.
 
 <a id="ufw"></a>
-## Some ports blocked, others open (netcheck shows a few ❌); ufw
+## Some ports blocked, others open (`nc -zv` times out, netcheck.py shows a few ❌); ufw
 
 **Cause:** `ufw` is enabled with only SSH allowed.
 ```bash
 sudo ufw status
-bash ~/bd_project/bd setup                           # adds: ufw allow from <each other node's IP>
-# by hand:  sudo ufw allow from 172.23.59.75   (and the other two nodes)
+for ip in $NODE1_IP $NODE2_IP $NODE3_IP $NODE4_IP; do [ "$ip" = "$MY_IP" ] || sudo ufw allow from $ip; done   # RUNBOOK P0-6
+nc -zv -w 3 node3 40000                              # from another node: timed out = still blocked
 ```
-Both directions matter: node A can reach node B does not prove B can reach A. netcheck prints both.
+Both directions matter: node A can reach node B does not prove B can reach A. `netcheck.py` tests both.
 
 <a id="sudo-host"></a>
-## `sudo: unable to resolve host <srn>`, or `bd setup` cannot use sudo
+## `sudo: unable to resolve host <srn>`, or `sudo` cannot be used
 
-**Cause:** the hostname is not in `/etc/hosts` (after our edit it is on your own node line). Run `bd setup` once more (it adds it). By hand:
+**Cause:** the hostname is not in `/etc/hosts` (after our edit it is on your own node line). Redo RUNBOOK P0-5, or by hand:
 ```bash
 echo "$(hostname -I | awk '{print $1}') $(hostname)" | sudo tee -a /etc/hosts
 ```
-If your user has no sudo, `bd setup` prints each command it could not run: ask a teammate or your admin to run it.
+If your user has no sudo, ask a teammate or your admin to run the `sudo` commands of the RUNBOOK for you.
 
 <a id="old-daemons"></a>
 ## Old course daemons (ResourceManager, NodeManager, SecondaryNameNode, a 2nd NameNode) still running
 
 **Cause:** the course's single-node setup started HDFS and YARN on this VM. They hold ports and are configured for `localhost`.
 ```bash
+jps                                                  # before our daemons run: ANY NameNode/DataNode/Master/Worker/... is an old one
+(
+  unset HADOOP_CONF_DIR HADOOP_LOG_DIR HADOOP_PID_DIR SPARK_CONF_DIR SPARK_LOG_DIR SPARK_PID_DIR
+  export HADOOP_CONF_DIR=/opt/hadoop/etc/hadoop      # the COURSE config, so the stop commands find the old pid files
+  yarn --daemon stop resourcemanager; yarn --daemon stop nodemanager
+  hdfs --daemon stop secondarynamenode; hdfs --daemon stop datanode; hdfs --daemon stop namenode
+  stop-history-server.sh; stop-worker.sh; stop-master.sh
+)
 jps
-bd stop --old                                        # stops them with the course config, kills as last resort
+kill <pid>                                           # last resort, from the jps output
 ```
-`bd start` and `bd hdfs-format` do this for you. Never run `start-dfs.sh`, `start-yarn.sh`, `start-all.sh` in this project.
+Never run `start-dfs.sh`, `start-yarn.sh`, `start-all.sh` in this project.
 
 <a id="port-in-use"></a>
 ## `BindException`, `Address already in use`
 
-**Cause:** another process owns the port (usually an old daemon, or a second `bd start` after a crash).
+**Cause:** another process owns the port (usually an old daemon, or our own daemon started twice after a crash).
 ```bash
 ss -tlnp | grep -E ':9000|:9866|:7077|:8080|:8081|:18080'
 jps
-bd stop --old ; bd stop ; bd start
+# old course daemon: see "Old course daemons" above. Ours: stop it with its own command (hdfs --daemon stop ..., stop-worker.sh, ...), then start it again
 ```
 
 <a id="clusterid"></a>
 ## `Incompatible clusterIDs` (DataNode does not start or never appears)
 
-**Cause:** the DataNode's data dir belongs to a different (older) NameNode. Happens after `bd hdfs-format --force`, or if an old dir is reused. Our dirs are fresh (`state/hdfs`), so it means HDFS was formatted twice.
+**Cause:** the DataNode's data dir belongs to a different (older) NameNode. Happens after HDFS was formatted again (RUNBOOK M2-1), or if an old dir is reused. Our dirs are fresh (`state/hdfs`), so it means HDFS was formatted twice.
 On the node that shows it (it holds no precious data; the blocks are copied again):
 ```bash
-bd stop
-bd datanode wipe
-bd start
-bd status
+hdfs --daemon stop datanode
+rm -rf ~/bd_project/state/hdfs/datanode              # this DataNode's block copies only; HDFS copies them back
+hdfs --daemon start datanode
+hdfs dfsadmin -report | grep -E "^Live datanodes|^Name:"
 ```
 
 <a id="safemode"></a>
@@ -125,7 +133,7 @@ bd status
 **Cause:** normal for about 30 s after the NameNode starts (and until DataNodes report). 
 ```bash
 hdfs dfsadmin -safemode get
-bd status                                            # waits for it
+# wait 30 s and ask again; it needs both DataNodes to report
 ```
 If it stays ON with both DataNodes live: `hdfs dfsadmin -safemode leave` (last resort).
 
@@ -134,8 +142,8 @@ If it stays ON with both DataNodes live: `hdfs dfsadmin -safemode leave` (last r
 
 **Cause:** the client reached the NameNode (port 9000) but cannot reach any DataNode on **port 9866**.
 ```bash
-bd netcheck                                          # all 4 nodes: is 9866 on node2 and node3 ✅ ?
-bd status                                            # both DataNodes live?
+for n in node2 node3; do nc -zv -w 3 $n 9866; done   # from the failing node: succeeded? timed out = firewall
+hdfs dfsadmin -report | grep -E "^Live datanodes|^Name:"   # both DataNodes live?
 sudo ufw status
 ```
 On node3/WSL2: [node3 on WSL2](#wsl2). Big writes stalling while small things work: [MTU](#mtu).
@@ -146,10 +154,11 @@ On node3/WSL2: [node3 on WSL2](#wsl2). Big writes stalling while small things wo
 **Cause:** `/etc/hosts` on that node maps its hostname to 127.0.1.1 (or a container/WSL address), or the NameNode sees a connection from the wrong interface.
 ```bash
 getent hosts $(hostname)                             # must be the ZeroTier IP
-bash ~/bd_project/bd setup ; bd stop ; bd start      # on that node
-bd status
+# fix /etc/hosts first (RUNBOOK P0-5), then restart the DataNode on that node:
+hdfs --daemon stop datanode ; hdfs --daemon start datanode
+hdfs dfsadmin -report | grep -E "^Live datanodes|^Name:"
 ```
-On WSL, `generateHosts=false` in `/etc/wsl.conf` must be set (setup does it) and `wsl --shutdown` run once.
+On WSL, `generateHosts=false` in `/etc/wsl.conf` must be set (RUNBOOK P0-2) and `wsl --shutdown` run once.
 
 <a id="refused-9000"></a>
 ## `Connection refused` to `node2:9000`
@@ -158,9 +167,9 @@ On WSL, `generateHosts=false` in `/etc/wsl.conf` must be set (setup does it) and
 ```bash
 # on node2
 jps | grep NameNode ; ss -tlnp | grep 9000           # must show 172.23.194.191:9000 or 0.0.0.0:9000, not 127.x
-bd start
+hdfs --daemon start namenode                         # if it was not running
 # on the failing node
-getent hosts node2 ; bd netcheck
+getent hosts node2 ; nc -zv -w 3 node2 9000
 ```
 
 <a id="permission"></a>
@@ -169,7 +178,9 @@ getent hosts node2 ; bd netcheck
 **Cause:** our 4 VMs have 4 different usernames. HDFS permission checking must be off **on node2** (the NameNode decides).
 ```bash
 grep -A1 permissions ~/bd_project/state/conf/hadoop/hdfs-site.xml     # on node2: false
-bd setup ; bd stop ; bd start                        # on node2
+# if it says true: set it to false in hdfs-site.xml (RUNBOOK P0-9), then on node2:
+hdfs --daemon stop namenode ; hdfs --daemon stop datanode
+hdfs --daemon start namenode ; hdfs --daemon start datanode
 ```
 
 <a id="no-resources"></a>
@@ -177,10 +188,10 @@ bd setup ; bd stop ; bd start                        # on node2
 
 **Cause:** no executor started or no executor could connect back to the driver, or another job holds all 4 cores.
 ```bash
-bd status                                            # 2 ALIVE workers?
+curl -s http://172.23.10.141:8080/json/ | python3 -m json.tool | grep -E '"(host|state)"'   # 2 ALIVE workers?
 # open http://172.23.10.141:8080 : is another application RUNNING? kill/finish it
-bd netcheck                                          # executors connect INTO the driver port 40000
-bd logs
+nc -zv -w 3 node3 40000                              # run on node2 while node3 does: nc -l 40000   (executors connect INTO the driver port 40000)
+tail -30 ~/bd_project/state/logs/<the job>.log
 ```
 Most often a firewall on the **driver** node (ufw, or WSL2: see [node3 on WSL2](#wsl2)).
 
@@ -189,10 +200,12 @@ Most often a firewall on the **driver** node (ufw, or WSL2: see [node3 on WSL2](
 
 **Cause:** the master (7077/8080) is reachable, but the other worker's executor cannot connect **back to the driver** (port 40000/40001) or its block manager port. The master UI cannot tell you that. This is exactly the WSL2 NAT problem.
 ```bash
-bd netcheck            # on all 4 nodes together. Look for "node2 -> node3: never reached my ports [40000 ...]"
+nc -l 40000                                          # on node3 (the driver) ...
+nc -zv -w 3 node3 40000                              # ... and this on node2: must say succeeded
+# bigger test: python3 scripts/netcheck.py on all 4 nodes together. Look for "node2 -> node3: never reached my ports [40000 ...]"
 ```
 - Driver on node3/WSL2: [node3 on WSL2](#wsl2) (ZeroTier must run inside Ubuntu).
-- Otherwise: [ufw](#ufw) on the driver node, then `bd check` again.
+- Otherwise: [ufw](#ufw) on the driver node, then run the cluster_check again (RUNBOOK M1-1).
 - The check waits 120 s because executors start one after the other. If it prints the diagnosis, a retry will not help.
 
 <a id="py-version"></a>
@@ -201,10 +214,10 @@ bd netcheck            # on all 4 nodes together. Look for "node2 -> node3: neve
 **Cause:** an executor started another Python (Spark 3.3.4 needs 3.10, Ubuntu 24.04's default is 3.12). Executors use the **driver's** path `/usr/bin/python3.10`.
 ```bash
 /usr/bin/python3.10 --version                        # on node1, node2, node3
-bd setup                                             # links it if python3.10 lives elsewhere
+sudo ln -s /usr/local/bin/python3.10 /usr/bin/python3.10   # if python3.10 lives elsewhere
 grep python ~/bd_project/state/conf/spark/spark-env.sh ~/bd_project/state/conf/spark/spark-defaults.conf
 ```
-Restart the worker on that node: `bd stop`; `bd start`.
+Restart the worker on that node: `stop-worker.sh`, then `start-worker.sh spark://172.23.10.141:7077`.
 
 <a id="py-missing"></a>
 ## `python3.10: not found` / `Cannot run program "/usr/bin/python3.10"` on an executor
@@ -212,16 +225,16 @@ Restart the worker on that node: `bd stop`; `bd start`.
 **Cause:** Python 3.10 is missing on node2/node3, or only at `/usr/local/bin/python3.10`.
 ```bash
 ls -l /usr/bin/python3.10 /usr/local/bin/python3.10
-sudo ln -s /usr/local/bin/python3.10 /usr/bin/python3.10      # or run: bd setup
+sudo ln -s /usr/local/bin/python3.10 /usr/bin/python3.10
 ```
 
 <a id="table-not-found"></a>
 ## `Table or view not found` / `TABLE_OR_VIEW_NOT_FOUND`
 
-**Cause:** the step that creates the table failed or has not run. `docs/links/rejects` come from `bd ingest`, `postings/doc_stats` from `bd index`, `pagerank` from `bd pagerank`.
+**Cause:** the step that creates the table failed or has not run. `docs/links/rejects` come from `ingest.py`, `postings/doc_stats` from `build_index.py`, `pagerank` from `pagerank.py`.
 ```bash
-bd logs ingest                                       # read the earlier job's log
-bd sql "SHOW TABLES IN iceberg_catalog.search"
+tail -30 ~/bd_project/state/logs/ingest-p0.log       # read the earlier job's log
+spark-sql --master local[2] --conf spark.eventLog.enabled=false -e "SHOW TABLES IN iceberg_catalog.search" 2> state/logs/sql.log
 ```
 Run the earlier step again.
 
@@ -231,7 +244,7 @@ Run the earlier step again.
 **Cause:** the Iceberg jar is missing in `state/jars/`.
 ```bash
 ls ~/bd_project/state/jars/                          # iceberg-spark-runtime-3.3_2.12-1.8.1.jar
-bd setup                                             # copies from /opt/iceberg or downloads + sha1 check
+# missing: redo RUNBOOK P0-8 (copy from /opt/iceberg or download, then sha1sum -c)
 ```
 
 <a id="stale-export"></a>
@@ -239,7 +252,9 @@ bd setup                                             # copies from /opt/iceberg 
 
 **Cause:** the `docs` table changed after the index/PageRank ran (a new ingest, or a rollback). The export refuses stale inputs on purpose.
 ```bash
-bd index N ; bd pagerank N ; bd export vN
+spark-submit code/node3_compute/build_index.py --phase N 2> state/logs/index-pN.log
+spark-submit code/node3_compute/pagerank.py --phase N 2> state/logs/pagerank-pN.log
+spark-submit code/node3_compute/export.py --version vN --phase N --export-root hdfs://node2:9000/search/exports 2> state/logs/export-vN.log
 ```
 
 <a id="exists"></a>
@@ -247,10 +262,10 @@ bd index N ; bd pagerank N ; bd export vN
 
 **Cause:** that export version is in HDFS already.
 ```bash
-bd export v0 --overwrite                             # old one is kept as _replaced_v0_<time>
+spark-submit code/node3_compute/export.py --version v0 --phase 0 --overwrite --export-root hdfs://node2:9000/search/exports 2> state/logs/export-v0.log   # old one is kept as _replaced_v0_<time>
 # or use a new name, e.g. v2
 ```
-`Table ... already exists` from `bd tag`: the tag name is taken; use another name.
+`Table ... already exists` from `ALTER TABLE ... CREATE TAG`: the tag name is taken; use another name.
 
 <a id="solo-leftover"></a>
 ## Spark binds to `127.0.0.1`, or `~/solo` exists (old solo-practice guide)
@@ -268,11 +283,11 @@ source ~/bd_project/venv/bin/activate ; echo $SPARK_LOCAL_IP        # your ZeroT
 <a id="wsl2"></a>
 ## node3 on WSL2
 
-WSL2 runs Ubuntu in a small VM behind a NAT. Spark executors on node2 must connect **into** node3's driver (port 40000) and block manager. WSL2's NAT and the Windows firewall block that. Symptom: `bd check` says ONLY ONE WORKER while `node3:8080` shows 2 workers; `bd netcheck` shows node2 never reaching node3's 40000.
+WSL2 runs Ubuntu in a small VM behind a NAT. Spark executors on node2 must connect **into** node3's driver (port 40000) and block manager. WSL2's NAT and the Windows firewall block that. Symptom: the cluster_check says ONLY ONE WORKER while `node3:8080` shows 2 workers; the `nc` test shows node2 never reaching node3's 40000.
 
 **The fix: run ZeroTier inside Ubuntu, not (only) on Windows.** Then the overlay traffic ends in Ubuntu's own `zt` interface and never crosses the Windows NAT.
 
-1. In Ubuntu: `bash ~/bd_project/bd setup`. It writes `/etc/wsl.conf`:
+1. In Ubuntu write `/etc/wsl.conf` (RUNBOOK P0-2):
    ```
    [boot]
    systemd=true
@@ -287,14 +302,14 @@ WSL2 runs Ubuntu in a small VM behind a NAT. Spark executors on node2 must conne
    sudo zerotier-cli join <network id>
    ```
 4. ZeroTier Central: authorize the **new** member, set its IP by hand to `172.23.10.141`, **delete the old Windows member** of node3 (two members must not share the IP). You may leave ZeroTier running on Windows, but its network membership for this network must go.
-5. `ip -4 -br a` in Ubuntu shows `172.23.10.141`. `bash ~/bd_project/bd setup` again. Then `bd netcheck` on all 4 nodes: node3 must be `ALL OK` including "node2 -> node3 ✅ reached all my ports".
+5. `ip -4 -br a` in Ubuntu shows `172.23.10.141`. Redo RUNBOOK P0-5 and P0-6 (hosts, ufw). Then the port test of P0-12: `nc -l 40000` on node3, `nc -zv -w 3 node3 40000` on node2 must say `succeeded`. (Optional, all ports: `python3 scripts/netcheck.py` on all 4 nodes at once: node3 must be `ALL OK` including "node2 -> node3 ✅ reached all my ports".)
 6. **Keep one Ubuntu terminal open** for the whole session. WSL shuts its VM down (and every daemon in it) when the last terminal closes. Optional: `%UserProfile%\.wslconfig`
    ```
    [wsl2]
    memory=6GB
    ```
    then `wsl --shutdown`.
-7. After a Windows reboot: open Ubuntu, `source ~/bd_project/venv/bin/activate`, `bd doctor`, `bd start`.
+7. After a Windows reboot: open Ubuntu, `source ~/bd_project/venv/bin/activate`, `jps`, then start the daemons again (RUNBOOK M3-1, M3-2).
 
 <a id="wsl2-windows"></a>
 ### Fallback: ZeroTier on Windows
@@ -310,9 +325,33 @@ Set-NetFirewallHyperVVMSetting -Name '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}' -D
 New-NetFirewallRule -DisplayName bd_project -Direction Inbound -Action Allow -Protocol TCP -LocalPort 7077,8080,8081,4040,18080,9864,9866,9867,40000-40031 -RemoteAddress 172.23.0.0/16
 wsl --shutdown
 ```
-In mirrored mode the ZeroTier adapter appears in Ubuntu (maybe as `eth1`); `bd` finds the IP on any interface. Verify with `bd netcheck` on all 4 nodes.
+In mirrored mode the ZeroTier adapter appears in Ubuntu (maybe as `eth1`); `env.sh` finds the IP on any interface. Verify with the `nc` test of P0-12.
 
 ---
+
+<a id="log-patterns"></a>
+## Which error text in a log means what
+
+Find it with `grep -E "Error|Exception|ERROR|FAIL" ~/bd_project/state/logs/<name>.log | tail`, or search all newest logs: `grep -lE "<pattern>" ~/bd_project/state/logs/*.log ~/bd_project/state/logs/hadoop/*.log ~/bd_project/state/logs/spark/*.out`.
+
+| grep for | Cause | Section |
+|---|---|---|
+| `Initial job has not accepted any resources` | executors cannot reach the driver, or no free cores | [no resources](#no-resources) |
+| `Master removed our application`, `Failed to connect to master`, `Could not connect to spark://` | cannot reach the Spark master on node3:7077 | [no resources](#no-resources) |
+| `Python in worker has different version` | executor Python is not 3.10 | [py-version](#py-version) |
+| `python3.10: (not found\|No such file)`, `Cannot run program "/usr/bin/python3.10"` | Python 3.10 missing on a worker node | [py-missing](#py-missing) |
+| `Incompatible clusterIDs` | old DataNode folder after a second format | [clusterID](#clusterid) |
+| `Name node is in safe mode`, `SafeModeException` | normal for ~30 s after NameNode start | [safe mode](#safemode) |
+| `could only be written to [0-9]+ of the [0-9]+ minReplication` | client cannot reach a DataNode on 9866 | [minReplication](#minreplication) |
+| `Connection refused.*:9000`, `Call From .* to node2:9000 failed` | NameNode not running or not reachable | [refused :9000](#refused-9000) |
+| `Permission denied` | `dfs.permissions.enabled` is not false on node2 | [Permission denied](#permission) |
+| `TABLE_OR_VIEW_NOT_FOUND`, `Table or view not found`, `NoSuchTableException` | an earlier step did not finish | [Table not found](#table-not-found) |
+| `ClassNotFoundException.*iceberg` | Iceberg jar missing | [ClassNotFound iceberg](#iceberg-class) |
+| `FAIL index built from the current docs snapshot`, `FAIL PageRank computed from the current docs snapshot` | stale index/PageRank | [stale export](#stale-export) |
+| `already exists` | export version or tag name taken | [already exists](#exists) |
+| `BindException`, `Address already in use` | port held by another process | [port in use](#port-in-use) |
+| `UnknownHostException` | a node name does not resolve (`/etc/hosts`) | [ping](#ping) |
+| `No space left on device` | disk full (`df -h`) | |
 
 <a id="not-tested"></a>
 ## What we could not test
@@ -323,4 +362,4 @@ The scripts and the pipeline were tested on a 4-container podman cluster on one 
 - `ufw` on the real VMs (containers have no ufw),
 - WSL2 and Windows itself (`wsl.conf`, `wsl --shutdown`, the Windows firewall, mirrored mode).
 
-`bd netcheck` on the four real machines is the proof step for all three. If it says `ALL OK`, HDFS and Spark will work. If it does not, its hints point to the sections above.
+The port test of RUNBOOK P0-12 (and, optionally, `python3 scripts/netcheck.py` on all 4 machines) is the proof step for all three. If `nc -zv` succeeds in both directions on 40000 and the daemon ports, HDFS and Spark will work. If not, the sections above say why.

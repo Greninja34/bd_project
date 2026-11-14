@@ -1,6 +1,6 @@
 """Query the running search service from a terminal, one line per result.
 
-    bd q "bubonic plague" [k]     (runs: python q.py ...) [--service=http://localhost:8000]
+    python code/node4_search/q.py "bubonic plague" [k] [--service=http://localhost:8000]
 """
 import json
 import sys

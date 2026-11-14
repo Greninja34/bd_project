@@ -1,7 +1,7 @@
 """Cluster smoke test. Run it from node1 AND from node3 once HDFS + Spark are up:
 
-    bd check          (runs: spark-submit code/tools/cluster_check.py)
-    bd check --drop   (removes the test table afterwards)
+    spark-submit code/tools/cluster_check.py
+    spark-submit code/tools/cluster_check.py --drop   (removes the test table afterwards)
 
 It proves, in about 30 seconds, the four things the real jobs need:
   1. tasks run on BOTH workers (node2 and node3), not just one
@@ -33,7 +33,7 @@ def where(_):
     import platform
     import textproc                                  # proves addPyFile reached this executor
     time.sleep(0.3)                                  # keep tasks alive so they spread over all executors
-    try:                                             # /etc/hosts (bd setup) maps the hostname to the team IP
+    try:                                             # /etc/hosts (RUNBOOK Part 0) maps the hostname to the team IP
         host = socket.gethostbyname(socket.gethostname())
     except OSError:
         host = socket.gethostname()
@@ -57,7 +57,7 @@ def main():
     spark = lake.get_spark("cluster-check")
     sc = spark.sparkContext
     me_ip = os.environ.get("MY_IP", "?")
-    me = os.environ.get("BD_NODE", socket.gethostname())
+    me = os.environ.get("NODE_NAME", socket.gethostname())
     ips = {os.environ[f"NODE{i}_IP"]: f"node{i}" for i in range(1, 5) if os.environ.get(f"NODE{i}_IP")}
     if "--drop" in sys.argv:
         spark.sql("DROP TABLE IF EXISTS iceberg_catalog.check.hello PURGE")
@@ -85,7 +85,7 @@ def main():
         print(f"[check] DIAGNOSIS: the executor on {' / '.join(missing)} never ran a task. It probably never")
         print(f"[check] connected back to this driver at {me_ip}:40000. The Spark master UI (node3:8080)")
         print("[check] may still list both workers: the master is reachable, the driver is not.")
-        print("[check] Run `bd netcheck` on all 4 nodes at the same time.")
+        print("[check] Check the ports between the nodes (RUNBOOK Part 0 port test; optional: python3 scripts/netcheck.py on all 4).")
         print("[check] If this driver is node3 on WSL2, see TROUBLESHOOTING.md#wsl2")
         sys.exit(1)
     print("[check] workers used:", ", ".join(sorted(used)), "-> OK")

@@ -12,8 +12,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import lake  # noqa: E402
 from lake import t  # noqa: E402
 
-TABLES = ["docs", "links", "rejects", "doc_changes", "doc_stats", "postings", "postings_stem",
-          "pagerank", "synonyms", "pipeline_runs"]
+TABLES = ["docs", "links", "rejects", "doc_changes", "doc_stats", "postings",
+          "pagerank", "pipeline_runs"]
 
 
 def main():

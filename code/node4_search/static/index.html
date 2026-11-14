@@ -43,15 +43,6 @@
   table { border-collapse: collapse; width: 100%; margin-top: 8px; }
   td, th { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
   .err { color: var(--bad); }
-  .toggles { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 4px 0 8px; font-size: 13px; color: var(--muted); }
-  .toggles label { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }
-  .toggles label.off { opacity: .45; cursor: not-allowed; }
-  .notice { font-size: 14px; margin: 6px 0; }
-  .notice a { color: var(--accent); cursor: pointer; font-weight: 600; }
-  .chip, .kw { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 99px;
-               border: 1px solid var(--line); margin: 2px 4px 2px 0; }
-  .chip { color: var(--pr); } .kw { color: var(--muted); }
-  mark { background: color-mix(in srgb, var(--pr) 30%, transparent); color: inherit; padding: 0 1px; border-radius: 3px; }
   code { font-size: 12px; }
 </style>
 </head>
@@ -65,15 +56,7 @@
     <input type="search" id="q" placeholder="Search Simple English Wikipedia, e.g. ocean, plague, computer science" autofocus>
     <button>Search</button>
   </form>
-  <div class="toggles" id="toggles">
-    <span>NLP extras:</span>
-    <label title="Porter stemming: phases = phase"><input type="checkbox" data-opt="stem"> stemming</label>
-    <label title="search the spelling correction"><input type="checkbox" data-opt="spell"> auto-correct</label>
-    <label title="add Word2Vec neighbours at weight 0.3 x similarity"><input type="checkbox" data-opt="expand"> Word2Vec expansion</label>
-    <label title="best-matching sentence with highlights"><input type="checkbox" data-opt="smart"> smart snippets</label>
-  </div>
-  <div class="meta" id="meta">All extras off = the spec's ranking: 0.7 x BM25 / max BM25 + 0.3 x PageRank / max PageRank</div>
-  <div id="notices"></div>
+  <div class="meta" id="meta">Ranking: 0.7 x BM25 / max BM25 + 0.3 x PageRank / max PageRank</div>
   <div id="results"></div>
 
   <details id="vers">
@@ -91,11 +74,6 @@ async function loadHealth() {
     const h = await (await fetch("/api/health")).json();
     $("ver").innerHTML = h.version ? `serving <b>${esc(h.version)}</b> · ${h.docs} docs`
                                    : `<span class="err">no version loaded</span>`;
-    document.querySelectorAll("[data-opt]").forEach(cb => {
-      const ok = !h.nlp || h.nlp[cb.dataset.opt] !== false;
-      cb.disabled = !ok; cb.parentElement.classList.toggle("off", !ok);
-      if (!ok) { cb.checked = false; cb.parentElement.title += " (not available for this version)"; }
-    });
   } catch { $("ver").innerHTML = `<span class="err">service unreachable</span>`; }
 }
 
@@ -114,41 +92,23 @@ async function loadVersions() {
   });
 }
 
-const opts = () => [...document.querySelectorAll("[data-opt]")].filter(c => c.checked).map(c => c.dataset.opt);
-const marked = (text, marks) => {             // escape, then wrap the highlight spans in <mark>
-  let out = "", at = 0;
-  for (const [a, b] of marks || []) { out += esc(text.slice(at, a)) + "<mark>" + esc(text.slice(a, b)) + "</mark>"; at = b; }
-  return out + esc(text.slice(at));
-};
-
-async function search(qOverride) {
-  const q = (qOverride ?? $("q").value).trim();
+async function search() {
+  const q = $("q").value.trim();
   if (!q) return;
   $("q").value = q;
-  const on = opts();
   const params = new URLSearchParams({q, k: 10});
-  on.forEach(o => params.set(o, 1));
   history.replaceState(null, "", "?" + params);
   $("meta").textContent = "searching...";
   const r = await fetch(`/api/search?${params}`);
   const d = await r.json();
   if (!r.ok) { $("meta").innerHTML = `<span class="err">${esc(d.detail)}</span>`; $("results").innerHTML = ""; return; }
-  $("meta").textContent = `${d.matches} matching docs · terms [${d.terms.join(", ")}] · version ${d.version} · ${d.took_ms} ms` +
-                          (on.length ? ` · extras: ${on.join(", ")}` : " · spec ranking");
-  let n = "";
-  if (d.did_you_mean && !d.corrected) n += `<div class="notice">Did you mean <a id="dym">${esc(d.did_you_mean)}</a>?</div>`;
-  if (d.corrected) n += `<div class="notice">Showing results for <b>${esc(d.did_you_mean)}</b></div>`;
-  if (d.expansions.length) n += `<div class="notice">Expanded with: ${d.expansions.map(([w, e, s]) => `<span class="chip" title="${esc(w)} → ${esc(e)}, similarity ${s}">${esc(e)}</span>`).join("")}</div>`;
-  d.notes.forEach(x => n += `<div class="notice err">${esc(x)}</div>`);
-  $("notices").innerHTML = n;
-  if ($("dym")) $("dym").onclick = () => search(d.did_you_mean);
+  $("meta").textContent = `${d.matches} matching docs · terms [${d.terms.join(", ")}] · version ${d.version} · ${d.took_ms} ms`;
   $("results").innerHTML = d.results.length ? d.results.map(x => {
     const bm = 0.7 * x.bm25_norm, pr = 0.3 * x.pagerank_norm;
     return `<div class="result">
       <a class="title" href="${esc(x.url)}" target="_blank" rel="noopener">${x.rank}. ${esc(x.title)}</a>
       <div class="url">${esc(x.url)} · doc_id ${esc(x.doc_id)}</div>
-      <div class="snippet">${marked(x.snippet, x.marks)}</div>
-      ${x.keywords.length ? `<div>${x.keywords.map(k => `<span class="kw">${esc(k)}</span>`).join("")}</div>` : ""}
+      <div class="snippet">${esc(x.snippet)}</div>
       <div class="scores">
         <span class="bar" title="BM25 part vs PageRank part"><span style="width:${bm*100}%"></span><span style="width:${pr*100}%"></span></span>
         <span>score <b>${x.score.toFixed(4)}</b></span>
@@ -162,7 +122,6 @@ $("f").onsubmit = (e) => { e.preventDefault(); search(); };
 $("vers").ontoggle = () => { if ($("vers").open) loadVersions(); };
 loadHealth();
 const p0 = new URLSearchParams(location.search);
-document.querySelectorAll("[data-opt]").forEach(cb => { cb.checked = p0.get(cb.dataset.opt) === "1"; cb.onchange = () => search(); });
 if (p0.get("q")) { $("q").value = p0.get("q"); search(); }
 </script>
 </body>

@@ -14,7 +14,6 @@ Announce each "→ say" line in the group chat, so the next person knows they ca
 | all | setup §0, §1, §2, §7b, §8 (no IPs needed for these) | [`01`](01-SETUP-ALL-MEMBERS.md) |
 | all | ZeroTier joined (§3), IP posted in the chat | [`01`](01-SETUP-ALL-MEMBERS.md) §3 |
 | M4 | venv + pip install + `/serving` | M4-1 |
-| M3 | numpy venv for Word2Vec | setup §8b |
 | all | read your own guide once, top to bottom | 02–05 |
 
 ## Call 1: the cluster (≈ 45–90 min)
@@ -35,21 +34,21 @@ Announce each "→ say" line in the group chat, so the next person knows they ca
 If Call 1 ends here, stop the cluster with M2-8's shutdown order. Next time, start it with M2-8's
 restart order (no format) and run `doctor.sh`.
 
-## Call 2: Phase 0, Phase 1, the demos (≈ 2–3 h with the NLP demos)
+## Call 2: Phase 0, Phase 1, the demos (≈ 2–3 h)
 
 ### Phase 0
 | # | Who | Do | ✅ / → say |
 |---|---|---|---|
 | 11 | M1 | **M1-3** upload, **M1-4** ingest, **M1-5** look, **M1-6** re-run | 1000 docs, 20 + 20 rejects, re-run = same snapshot → "Phase 0 ingested" + snapshot id |
-| 12 | M3 | **M3-5** index, **M3-6b** Word2Vec, **M3-6** PageRank, **M3-7** export v0 | all PASS (incl. 2 `[nlp]`) → "v0 exported" |
-| 13 | M4 | **M4-4** pull v0, **M4-5** queries, **M4-5b** the 4 NLP switches | "Bubonic plague" first; April 5th for "april"; each twist before/after |
+| 12 | M3 | **M3-5** index, **M3-6** PageRank, **M3-7** export v0 | all PASS → "v0 exported" |
+| 13 | M4 | **M4-4** pull v0, **M4-5** queries | "Bubonic plague" first; April 5th for "april" |
 | 14 | M2 | **M2-4** lake report, HDFS files, `fsck`, **tag phase0** | replication 2.0, tag listed |
 
 ### Phase 1
 | # | Who | Do | ✅ / → say |
 |---|---|---|---|
 | 15 | M1 | **M1-7** upload + ingest changes, **M1-8** re-run | 25 / 25 / 50, 975 docs, 7 dangling links → "Phase 1 ingested" |
-| 16 | M3 | **M3-8** incremental index, **M3-9** Word2Vec + PageRank + export v1 | `mode: incremental`, fingerprint `54ee091e74b5` → "v1 exported" |
+| 16 | M3 | **M3-8** incremental index, **M3-9** PageRank + export v1 | `mode: incremental`, fingerprint `54ee091e74b5` → "v1 exported" |
 | 17 | M4 | **M4-6** pull v1, the same queries again | Alan Turing gone, "Bubonic plague (Phase 1)" |
 | 18 | M2 | **M2-5** tag phase1, snapshots, time travel | 1000 vs 975, `deleted_in_phase1 = 50` |
 
@@ -70,8 +69,8 @@ restart order (no format) and run `doctor.sh`.
 |---|---|
 | M1 | `fsck` replication of pages.jsonl · Phase 0 ingest summary · rejects query · re-run (same snapshot) · Phase 1 summary · doc_changes query · Phase 1 re-run |
 | M2 | `dfsadmin -report` 2 live + NameNode UI · lake report after Phase 0 and after Phase 1 (history) · time-travel queries · bad delete + rollback history · DataNode dead / back |
-| M3 | Spark master UI with 2 workers · index (full, then incremental) · PageRank iterations Phase 0 + 1 · export (14 PASS + 2 NLP) · Word2Vec neighbours · fault-tolerance run + grep + UI · broken export · history server stages |
-| M4 | UI with v0 results (score bars visible) · 3 NLP twists before/after (stemming, did-you-mean, Word2Vec expansion) · pull v0 · pull v1 + same queries · REFUSED pull · version switch (UI *Versions* panel) |
+| M3 | Spark master UI with 2 workers · index (full, then incremental) · PageRank iterations Phase 0 + 1 · export (13 PASS) · fault-tolerance run + grep + UI · broken export · history server stages |
+| M4 | UI with v0 results (score bars visible) · pull v0 · pull v1 + same queries · REFUSED pull · version switch (UI *Versions* panel) |
 
 Also save the logs: `~/ingest-p*.log`, `~/index-p*.log`, `~/pagerank-*.log`, `~/export-*.log`
 (they hold Spark's view of each run).

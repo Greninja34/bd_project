@@ -41,7 +41,6 @@ bash ~/project_search_engine/code/tools/check_prereqs.sh node1     # or node2 / 
 |---|---|---|
 | Spark 3.3.4 + Python 3.10 + `PYSPARK_PYTHON` | course guide 07 | master, worker, and the drivers of 4 jobs |
 | 🌐 Iceberg jar at `/opt/iceberg/` | team-run/01 §8 | the drivers read and write Iceberg |
-| 🌐 `~/nlp-venv`: Python 3.10 venv with `numpy==1.26.4` | team-run/01 §8b | NLP twist: `pyspark.ml` (Word2Vec) needs numpy on the driver |
 
 ## Member 4: node4 (Search service + UI), 2 GB RAM
 
@@ -55,7 +54,7 @@ bash ~/project_search_engine/code/tools/check_prereqs.sh node1     # or node2 / 
 ## Before the first call, every member also
 
 1. Does [`team-run/07-SOLO-PRACTICE.md`](team-run/07-SOLO-PRACTICE.md) on their own VM (~30–45 min). It needs the
-   Spark items above; members 1–3 also need `~/search-venv` (M4-1) and `~/nlp-venv` (§8b) for the full solo run.
+   Spark items above; members 1–3 also need `~/search-venv` (M4-1) for the full solo run.
 2. Does [`team-run/01-SETUP-ALL-MEMBERS.md`](team-run/01-SETUP-ALL-MEMBERS.md) §0, §1, §2, §7b, §8 (no IPs needed yet).
 3. Posts their ZeroTier IP in the group chat.
 4. Reads their own guide (team-run/02–05) once, top to bottom.

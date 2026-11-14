@@ -34,8 +34,7 @@ def verify_export(path):
         raise ExportInvalid(f"manifest.json unreadable: {e}")
     if m.get("status") != "OK":
         raise ExportInvalid(f"manifest status is {m.get('status')}")
-    failed = [c["check"] for c in m.get("checks", [])
-              if not c.get("ok") and c.get("level", "error") == "error"]   # "warn" = optional NLP extras
+    failed = [c["check"] for c in m.get("checks", []) if not c.get("ok")]
     if failed:
         raise ExportInvalid(f"failed checks: {failed}")
     for f in m.get("files", []):
@@ -47,11 +46,6 @@ def verify_export(path):
     if n_docs != m["counts"]["docs"] or n_post != m["counts"]["postings"]:
         raise ExportInvalid(f"row counts {n_docs}/{n_post} do not match manifest "
                             f"{m['counts']['docs']}/{m['counts']['postings']}")
-    for extra in ("postings_stem", "synonyms"):            # NLP twist tables, when the export has them
-        if m["counts"].get(extra):
-            n = pq.ParquetDataset(os.path.join(path, extra)).read(columns=["term"]).num_rows
-            if n != m["counts"][extra]:
-                raise ExportInvalid(f"{extra}: {n} rows, manifest says {m['counts'][extra]}")
     return m
 
 

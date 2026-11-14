@@ -4,9 +4,8 @@
 
 Output tables:
     search.postings       (term, doc_id, tf)      the inverted index; df is computed at export time
-    search.postings_stem  (term, doc_id, tf)      the same, with Porter stems as terms (NLP twist)
-    search.doc_stats      (doc_id, length, snippet, body)
-                          length = number of indexed terms (BM25's len(D)); body = cleaned prose
+    search.doc_stats      (doc_id, length, snippet)
+                          length = number of indexed terms (BM25's len(D))
 
 Modes (chosen automatically, or forced with --full):
     full         first run, or --full: tokenize every doc, replace both tables
@@ -28,7 +27,7 @@ from lake import t  # noqa: E402
 
 
 def build(spark, docs):
-    """docs (doc_id, title, text) -> (doc_stats, postings, postings_stem) DataFrames."""
+    """docs (doc_id, title, text) -> (doc_stats, postings) DataFrames."""
     from pyspark.sql import functions as F
     from pyspark.sql.types import ArrayType, StringType
 
@@ -36,39 +35,24 @@ def build(spark, docs):
         import textproc                      # shipped to the executors by lake.get_spark()
         return textproc.doc_terms(title, text)
 
-    def _stems(terms):
-        import textproc
-        return textproc.stem_terms(terms)    # NLP twist: Porter stems, one per term
-
     def _snippet(text):
         import textproc
         return textproc.make_snippet(text)
 
-    def _body(text):
-        import textproc
-        return textproc.clean_body(text)     # NLP twist: plain prose for query-aware snippets
-
     terms_udf = F.udf(_terms, ArrayType(StringType()))
-    stems_udf = F.udf(_stems, ArrayType(StringType()))
     snippet_udf = F.udf(_snippet, StringType())
-    body_udf = F.udf(_body, StringType())
     tok = (docs.select("doc_id", terms_udf("title", "text").alias("terms"),
-                       snippet_udf("text").alias("snippet"), body_udf("text").alias("body"))
-               .withColumn("stems", stems_udf("terms"))
+                       snippet_udf("text").alias("snippet"))
                .cache())
-    stats = tok.select("doc_id", F.size("terms").alias("length"), "snippet", "body")
-
-    def postings_of(col):
-        return (tok.select("doc_id", F.explode(col).alias("term"))
+    stats = tok.select("doc_id", F.size("terms").alias("length"), "snippet")
+    postings = (tok.select("doc_id", F.explode("terms").alias("term"))
                    .groupBy("term", "doc_id").agg(F.count(F.lit(1)).cast("int").alias("tf")))
-    # Both indexes have the same doc lengths (one stem per term), so doc_stats serves both.
-    return stats, postings_of("terms"), postings_of("stems")
+    return stats, postings
 
 
-def write_all(stats, postings, postings_stem):
+def write_all(stats, postings):
     write_replace(stats, "doc_stats")
     write_replace(postings, "postings", ["term"])
-    write_replace(postings_stem, "postings_stem", ["term"])
 
 
 def write_replace(df, name, sort_cols=None):
@@ -92,7 +76,7 @@ def main():
 
     cur = lake.current_snapshot(spark, "docs")
     last = lake.last_run(spark, "index")
-    have_tables = all(lake.table_exists(spark, n) for n in ("postings", "postings_stem", "doc_stats"))
+    have_tables = all(lake.table_exists(spark, n) for n in ("postings", "doc_stats"))
     docs = spark.table(t("docs")).select("doc_id", "title", "text")
 
     mode, changed = "full", None
@@ -116,14 +100,13 @@ def main():
         if ids:
             id_list = ", ".join("'" + i.replace("'", "''") + "'" for i in ids)
             # 1. remove every posting / stat of a changed doc (covers UPDATED and DELETED) ...
-            for name in ("postings", "postings_stem", "doc_stats"):
+            for name in ("postings", "doc_stats"):
                 spark.sql(f"DELETE FROM {t(name)} WHERE doc_id IN ({id_list})")
             # 2. ... then add fresh ones for the docs that still exist (ADDED and UPDATED)
             live = changed.where(F.col("change_type") != "DELETED").select("doc_id")
-            stats, postings, postings_stem = build(spark, docs.join(live, "doc_id", "left_semi"))
+            stats, postings = build(spark, docs.join(live, "doc_id", "left_semi"))
             stats.writeTo(t("doc_stats")).append()
             postings.sortWithinPartitions("term").writeTo(t("postings")).append()
-            postings_stem.sortWithinPartitions("term").writeTo(t("postings_stem")).append()
         # safety net: the incremental result must cover exactly the docs in the table
         st_ids = spark.table(t("doc_stats")).select("doc_id")
         all_ids = docs.select("doc_id")
@@ -138,15 +121,12 @@ def main():
     agg = st.agg(F.avg("length").alias("avg"), F.max("length").alias("mx")).collect()[0]
     n_post = po.count()
     n_terms = po.select("term").distinct().count()
-    ps = spark.table(t("postings_stem"))
-    n_post_s, n_stems = ps.count(), ps.select("term").distinct().count()
     top = (po.groupBy("term").agg(F.count("*").alias("df")).orderBy(F.desc("df"), "term").limit(8).collect())
-    detail.update({"docs": n_docs, "postings": n_post, "terms": n_terms, "stems": n_stems,
+    detail.update({"docs": n_docs, "postings": n_post, "terms": n_terms,
                    "postings_snapshot": lake.current_snapshot(spark, "postings")})
     lake.banner("INVERTED INDEX", [
         ("mode", mode), ("docs snapshot indexed", cur), ("docs in index", n_docs),
         ("distinct terms", n_terms), ("postings (term, doc) rows", n_post),
-        ("stemmed index: distinct stems / postings", f"{n_stems} / {n_post_s}"),
         ("avg / max doc length (terms)", f"{agg['avg']:.1f} / {agg['mx']}"),
         ("most common terms (df)", ", ".join(f"{r['term']}={r['df']}" for r in top)),
         ("seconds", round(time.time() - t0, 1))])

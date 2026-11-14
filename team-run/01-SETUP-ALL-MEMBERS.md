@@ -277,18 +277,6 @@ Spark ships it to the executors itself (`spark.jars`).
 
 ✅ `sha1sum -c` prints `OK`.
 
-## §8b. numpy for the Word2Vec driver  [3]  (NLP twist; at home, needs internet)
-
-Spark's ML library (`pyspark.ml`, used by `word2vec.py`) needs numpy in the **driver's** Python.
-The executors don't, because the training itself runs in the JVM. So only node 3 gets a small
-Python 3.10 venv. The system Python stays untouched, and so do the other nodes.
-```bash
-python3.10 -m venv ~/nlp-venv
-~/nlp-venv/bin/pip install numpy==1.26.4
-~/nlp-venv/bin/python -c "import numpy, sys; print(sys.version.split()[0], numpy.__version__)"
-```
-✅ `3.10.x 1.26.4`. (numpy 1.26, not 2.x: Spark 3.3.4's Python code predates numpy 2.)
-
 ## §9. The doctor  [all]
 
 ```bash

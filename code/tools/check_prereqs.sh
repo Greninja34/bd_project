@@ -30,10 +30,6 @@ if [ "$NODE" != node4 ]; then
   chk "Iceberg 1.8.1 jar"             "[ -f /opt/iceberg/iceberg-spark-runtime-3.3_2.12-1.8.1.jar ]"      "team-run/01 §8"
   chk "passwordless ssh localhost"    "ssh -o BatchMode=yes -o ConnectTimeout=3 localhost true"           "course guide 03 §4"
 fi
-if [ "$NODE" = node3 ]; then
-  echo "== node3: NLP (Word2Vec driver)"
-  chk "~/nlp-venv with numpy 1.26"    "~/nlp-venv/bin/python -c 'import numpy; assert numpy.__version__.startswith(\"1.26\")'" "team-run/01 §8b"
-fi
 if [ "$NODE" = node4 ]; then
   echo "== node4: search service"
   chk "~/search-venv with the deps"   "~/search-venv/bin/python -c 'import fastapi, uvicorn, pandas, pyarrow'" "team-run/05 M4-1"

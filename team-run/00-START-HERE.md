@@ -30,16 +30,14 @@ code/
   common/lake.py              Iceberg table names, snapshot helpers, run log
   node1_ingestion/ingest.py   Member 1: parse, validate, dedupe, MERGE INTO Iceberg, change detection, link cleaning
   node2_storage/lake_report.py  Member 2: every table, row counts, snapshots, history, tags, rejects, run log
-  node3_compute/build_index.py  Member 3: inverted index (full or incremental) + the stemmed index
-  node3_compute/word2vec.py     Member 3: NLP - Spark MLlib Word2Vec -> nearest-neighbour table
+  node3_compute/build_index.py  Member 3: inverted index (full or incremental)
   node3_compute/pagerank.py     Member 3: PageRank with RDDs, >= 10 iterations, d = 0.85
-  node3_compute/export.py       Member 3: 14 blocking + 2 NLP checks, keywords (TF-IDF), atomic Parquet export
-  node4_search/app.py           Member 4: FastAPI service + version switching + the NLP switches
+  node3_compute/export.py       Member 3: 13 validation checks, atomic Parquet export
+  node4_search/app.py           Member 4: FastAPI service + version switching
   node4_search/bm25.py          Member 4: the course BM25 snippet with its 2 bugs fixed + the final score
-  node4_search/nlp.py           Member 4: NLP - spelling correction, Word2Vec expansion, smart snippets
   node4_search/pull_export.py   Member 4: HDFS -> /serving/vN, verify, switch
   node4_search/q.py             Member 4: query the service from the terminal
-  node4_search/static/index.html  the search UI (with a switch per NLP extra)
+  node4_search/static/index.html  the search UI
   tools/doctor.sh             any node: what's wrong with my network / daemons?
   tools/cluster_check.py      proves both workers, Python 3.10, Iceberg-on-HDFS all work
   tools/netmeter.sh           bytes sent/received on ZeroTier during a command
@@ -57,22 +55,6 @@ code/
 Put **node2 and node3 on the two most stable laptops** (they hold all the data). Node 3 needs the
 most RAM (4–6 GB VM), node 2 next (4 GB), node 1 3 GB, node 4 2 GB.
 
-## Our NLP twists (beyond the spec)
-
-All four are **off by default**. With every switch off, the search returns exactly the spec's
-ranking (`0.7·BM25/max + 0.3·PR/max`). Each one is a switch in the UI and a parameter in the API,
-so the demo can show the spec ranking first and then what each twist changes.
-
-| Twist | Computed where | Switch | Demo query (measured) |
-|---|---|---|---|
-| **Porter stemming**: "phases", "phased" → "phase" | Spark, node3 (`postings_stem`, a second index built next to the first) | `stem=1` | "phases": 12 → 28 matches on v0; 12 → **75** on v1, where the Phase 1 pages appear |
-| **"Did you mean" / auto-correct** from the index's own vocabulary | node4 (`nlp.Speller`) | always suggests; `spell=1` searches the fix | "bubnic plauge": 0 results → *Did you mean bubonic plague* → Bubonic plague first |
-| **Word2Vec query expansion** | **Spark MLlib on the cluster**, node3 (`word2vec.py` → `search.synonyms`) | `expand=1` | v0 model: "king" + queen, consort; "computer" + hardware, computers; "river" + danube, yangtze (the neighbours shift a little with every training run) |
-| **Smart snippets + keywords**: the sentence that matches the query, highlighted; top-5 TF-IDF keywords per doc | snippets node4; keywords **Spark** in the export | `smart=1` (keywords always shown) | "speed of light" → "*The biggest **speed** is the **speed** of **light**.*" |
-
-Member 3 owns the Spark-side twists (stemmed index, Word2Vec, keywords); Member 4 owns the query
-side and the demo of all of them.
-
 ## The pipeline in one picture
 
 ```
@@ -87,14 +69,12 @@ side and the demo of all of them.
                               docs  links  rejects  doc_changes  pipeline_runs
                                 │
             node3 drivers:  build_index.py  → postings, doc_stats
-                            word2vec.py     → synonyms            (NLP, Spark MLlib)
                             pagerank.py     → pagerank            (10 iterations)
                             export.py       → checks → /search/exports/v0/  (+ manifest.json, _SUCCESS)
                                                                    │
                                                  pull_export.py ◄──┘ hdfs dfs -get, verify
                                                  /serving/v0/ → CURRENT=v0 → FastAPI reloads
                                                  http://node4:8000   BM25 x 0.7 + PageRank x 0.3
-                                                                     (+ optional NLP switches)
  Phase 1: changes.jsonl → the same stages → v1 → switch (v0 stays available)
 ```
 
@@ -105,7 +85,7 @@ side and the demo of all of them.
 | [`07-SOLO-PRACTICE.md`](07-SOLO-PRACTICE.md) on your own VM | each of you, before the call | 30–45 min |
 | [`01-SETUP-ALL-MEMBERS.md`](01-SETUP-ALL-MEMBERS.md) §1–§8 | each of you, before the call (needs the ZeroTier IPs) | 30–60 min |
 | **Call 1**: cluster up (HDFS, Spark, cluster check, service started) | together | 45–90 min |
-| **Call 2**: Phase 0, Phase 1, failure demos, NLP demos, screenshots | together | 2–3 h |
+| **Call 2**: Phase 0, Phase 1, failure demos, screenshots | together | 2–3 h |
 
 The spec says a phase takes 10–15 min of pipeline time. Locally each job takes 20–50 s; over
 ZeroTier, expect 1–4 min per job, and longer when traffic is RELAYED instead of DIRECT.
@@ -128,8 +108,8 @@ following. Each choice can be explained, and the ones marked ⚙ can be changed 
 | PageRank details | start at 1/N, dangling rank spread evenly, **exactly 10** iterations | ⚙ `--iterations N` (N ≥ 10) |
 | BM25 snippet bugs | both fixed (length lookup; only matching docs are scored) | |
 | Normalisation | max BM25 over **this query's** matches; max PageRank over **the corpus** | |
-| Text processing | strip wiki markup, lowercase, drop ~120 stopwords, **title indexed with the body**; the spec ranking uses exact words | ⚙ `stem=1` per query (Porter stemming, NLP twist) |
-| Export validation | 14 blocking checks (counts, ids, PageRank sums to 1, no orphan postings in either index, built from the current snapshot ...) + 2 NLP checks that only warn | |
+| Text processing | strip wiki markup, lowercase, drop ~120 stopwords, **title indexed with the body**; exact words, no stemming | |
+| Export validation | 13 checks (counts, ids, PageRank sums to 1, no orphan postings, built from the current snapshot ...) | |
 
 ## Spec deliverables → where they are shown
 
@@ -143,4 +123,3 @@ following. Each choice can be explained, and the ones marked ⚙ can be changed 
 | 4. Spark fault tolerance | Member 3 + 2: executor killed mid-PageRank, same result fingerprint | M3-10 |
 | 5. BM25 relevance ranking | Member 4: score breakdown in the UI/API | M4-5 |
 | 6. Search service + frontend, before/after changes | Member 4: v0 queries, switch to v1, same queries, refused broken export | M4-5 … M4-8 |
-| *Beyond the spec:* NLP twists | Member 3: stemmed index, Word2Vec, keywords · Member 4: the 4 switches, before/after | M3-6b, M4-5b |

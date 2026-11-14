@@ -73,8 +73,7 @@ cd ~/project_search_engine
 spark-submit --properties-file ~/spark-config/search.conf code/node2_storage/lake_report.py 2>/dev/null
 ```
 ✅ `docs 1000 rows | 1 snapshots`, `links 499`, `rejects 40`, `doc_stats 1000`, `postings 233643`,
-`postings_stem 209719`, `pagerank 1000`, `synonyms ~52000` (Word2Vec neighbours: the vocabulary × 5;
-the exact count varies a little per training run). 📸 screenshot.
+`pagerank 1000`. 📸 screenshot.
 
 Look at what Iceberg put in HDFS (this is the Iceberg hands-on, on our real table):
 ```bash

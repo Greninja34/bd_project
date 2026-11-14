@@ -6,9 +6,7 @@ mode and the Iceberg warehouse in a local folder (no HDFS, no cluster, no ZeroTi
 Everything lives in `~/solo`, and `rm -rf ~/solo` removes it all.
 
 Needs: Java 11, Spark 3.3.4, Python 3.10 (all from the course guides), the Iceberg jar
-(setup §8), and, both needing internet once:
-- for the search part: the venv from M4-1 (`~/search-venv`);
-- for the Word2Vec twist: the numpy venv from setup §8b (`~/nlp-venv`).
+(setup §8), and, for the search part (needs internet once), the venv from M4-1 (`~/search-venv`).
 
 ## S-1. A local config
 
@@ -43,15 +41,13 @@ In every new terminal for this practice: re-run the `SOLO=...`, `export SPARK_LO
 spark-submit --properties-file $SOLO/solo.conf code/node1_ingestion/ingest.py \
     --phase 0 --input file://$HOME/project_search_engine/data/phase-0/pages.jsonl 2>/dev/null
 spark-submit --properties-file $SOLO/solo.conf code/node3_compute/build_index.py --phase 0 2>/dev/null
-spark-submit --properties-file $SOLO/solo.conf --conf spark.pyspark.driver.python=$HOME/nlp-venv/bin/python \
-    code/node3_compute/word2vec.py --phase 0 2>/dev/null
 spark-submit --properties-file $SOLO/solo.conf code/node3_compute/pagerank.py --phase 0 2>/dev/null
 spark-submit --properties-file $SOLO/solo.conf code/node3_compute/export.py \
     --phase 0 --version v0 --export-root file://$SOLO/exports 2>/dev/null
 ```
 ✅ The same numbers as the team guides: 1000 docs, 20 + 20 rejects, 499 links · 37551 terms,
-233643 postings, 28485 stems · Word2Vec vocabulary 10448 (king → queen ...) · PageRank fingerprint `60a6221350e7` · `EXPORT v0: OK`, all PASS.
-(Each job takes 20–50 s, Word2Vec ~80 s. If one prints nothing, drop the `2>/dev/null` to see the error.)
+233643 postings · PageRank fingerprint `60a6221350e7` · `EXPORT v0: OK`, all PASS.
+(Each job takes 20–50 s. If one prints nothing, drop the `2>/dev/null` to see the error.)
 
 ## S-3. Serve it
 
@@ -65,13 +61,8 @@ Back in terminal 1 (or open `http://localhost:8000`):
 ```bash
 q() { ~/search-venv/bin/python ~/project_search_engine/code/node4_search/q.py "$@"; }
 q "bubonic plague"; q april 6; q "alan turing"
-q phases 3 --opts=stem; q "bubnic plauge" 2 --opts=spell; q river 3 --opts=expand
-q "speed of light" 1 --opts=smart
 ```
 ✅ Bubonic plague (100) first; for "april", April (1) is 5th (see M4-5 for why); Alan Turing (13) first.
-The NLP lines: 28 matches for "phases" (12 without stem) · *showing results for bubonic plague* ·
-*expanded with danube, yangtze* · "The biggest speed is the speed of light." · Flea 2nd.
-In the UI, tick the **NLP extras** boxes one at a time (M4-5b has the full table).
 
 ## S-4. Phase 1
 
@@ -79,8 +70,6 @@ In the UI, tick the **NLP extras** boxes one at a time (M4-5b has the full table
 spark-submit --properties-file $SOLO/solo.conf code/node1_ingestion/ingest.py \
     --phase 1 --input file://$HOME/project_search_engine/data/phase-1/changes.json 2>/dev/null
 spark-submit --properties-file $SOLO/solo.conf code/node3_compute/build_index.py --phase 1 2>/dev/null
-spark-submit --properties-file $SOLO/solo.conf --conf spark.pyspark.driver.python=$HOME/nlp-venv/bin/python \
-    code/node3_compute/word2vec.py --phase 1 2>/dev/null
 spark-submit --properties-file $SOLO/solo.conf code/node3_compute/pagerank.py --phase 1 2>/dev/null
 spark-submit --properties-file $SOLO/solo.conf code/node3_compute/export.py \
     --phase 1 --version v1 --export-root file://$SOLO/exports 2>/dev/null

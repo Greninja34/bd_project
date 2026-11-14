@@ -8,15 +8,12 @@ You also run the Spark fault-tolerance demo.
 **What you must be able to explain:** master vs worker vs driver vs executor; what the index's
 `groupBy` shuffles; incremental indexing from Iceberg snapshots; the PageRank formula and why
 dangling rank is spread evenly; lineage and how Spark recovers a lost executor; the export
-checks and why the publish is atomic. **NLP twists (yours on the Spark side):** the stemmed
-index, Word2Vec (what a word vector is, skip-gram, why it runs in Spark MLlib), TF-IDF keywords.
+checks and why the publish is atomic.
 The code: [`build_index.py`](../code/node3_compute/build_index.py),
-[`word2vec.py`](../code/node3_compute/word2vec.py),
 [`pagerank.py`](../code/node3_compute/pagerank.py), [`export.py`](../code/node3_compute/export.py),
-and the stemmer in [`common/textproc.py`](../code/common/textproc.py).
+and the tokenizer in [`common/textproc.py`](../code/common/textproc.py).
 
-Before you start: [`01-SETUP-ALL-MEMBERS.md`](01-SETUP-ALL-MEMBERS.md) §0–§9 done on node3,
-**including §8b** (the numpy venv for Word2Vec). Your VM should have the most RAM (4–6 GB).
+Before you start: [`01-SETUP-ALL-MEMBERS.md`](01-SETUP-ALL-MEMBERS.md) §0–§9 done on node3. Your VM should have the most RAM (4–6 GB).
 
 ---
 
@@ -82,7 +79,6 @@ mode: full
 docs in index: 1000
 distinct terms: 37551
 postings (term, doc) rows: 233643
-stemmed index: distinct stems / postings: 28485 / 209719
 avg / max doc length (terms): 461.0 / 13903
 ```
 How it works: a Python UDF (on the executors) runs `textproc.doc_terms(title, text)`: strip wiki
@@ -90,39 +86,6 @@ markup, lowercase, split, drop stopwords. Then `explode` turns each doc into one
 and `groupBy(term, doc_id).count()` gives `tf`. That **groupBy is the shuffle**: every executor
 sends each (term, doc) pair to the executor that owns that term's partition. `length` = number of
 terms per doc (BM25's `len(D)`). `df` is computed later, in the export.
-
-**NLP twist, the stemmed index:** the same terms also go through the Porter stemmer (in
-`textproc.py`, pure Python, so it runs on the executors) and are grouped a second time into
-`search.postings_stem`. 37,551 distinct words collapse to 28,485 stems ("phases", "phased",
-"phasing" → "phase"). Both indexes have the same doc lengths (one stem per word), so `doc_stats`
-serves both. The job also stores `body`, the cleaned prose of each doc, for Member 4's smart snippets.
-
-## M3-6b. Word2Vec (NLP twist, ~1–2 min)
-
-```bash
-spark-submit --properties-file ~/spark-config/search.conf \
-    --conf spark.pyspark.driver.python=$HOME/nlp-venv/bin/python \
-    code/node3_compute/word2vec.py --phase 0 2> ~/word2vec-p0.log
-```
-✅ (📸 screenshot; the neighbours vary slightly from run to run, but should look like this):
-```
-training tokens: 461002
-vocabulary (min count 5): 10448
-vector size / window / iterations / partitions: 100 / 5 / 5 / 2
-  king: queen 0.76, consort 0.75, ...
-  planet: jupiter 0.80, saturn 0.80, planets 0.80, moons 0.78
-  river: danube 0.74, yangtze 0.72, mississippi 0.71, mekong 0.71
-  computer: hardware 0.84, computers 0.80, program 0.79, programs 0.75
-```
-- The executors tokenize the docs (the same `doc_terms` as the index). **Spark MLlib's Word2Vec**
-  (skip-gram) then trains a 100-number vector per word over 2 partitions on the workers. Words that
-  appear in similar contexts end up with similar vectors.
-- The driver then takes the cosine similarity of every word with every other word (numpy, in
-  chunks of 1000) and keeps the 5 nearest per word → `search.synonyms`. Node 4 uses them for `expand=1`.
-- `--conf spark.pyspark.driver.python=...nlp-venv...`: only the **driver** needs numpy (`pyspark.ml`
-  imports it); the executors keep plain `/usr/bin/python3.10`.
-- Word2Vec is not reproducible run to run (random init + parallel updates), so the neighbours
-  differ slightly between runs. That's why the export only *warns* if it is stale.
 
 ## M3-6. PageRank
 
@@ -154,23 +117,14 @@ spark-submit --properties-file ~/spark-config/search.conf code/node3_compute/exp
 hdfs dfs -ls -R /search/exports/v0
 hdfs dfs -cat /search/exports/v0/manifest.json | head -30
 ```
-✅ 14 blocking `PASS ...` lines, 2 more `PASS [nlp] ...` lines (keywords for every doc, synonyms
-from the current snapshot), and `EXPORT v0: OK`. In HDFS: `docs/` (~2.5 MB: now with the cleaned
-`body` and `keywords`), `postings/` (~850 KB), `postings_stem/` (~720 KB), `synonyms/` (~600 KB),
+✅ 13 `PASS ...` lines and `EXPORT v0: OK`. In HDFS: `docs/`, `postings/` (~850 KB),
 `manifest.json`, `_SUCCESS`. 📸 screenshot.
 Announce **"v0 exported"**. Member 4 pulls it (M4-4).
-
-**NLP twist, keywords:** for every doc, the export picks the 5 terms with the highest TF-IDF =
-`(tf / length) · ln(N / df)`: frequent in this doc, rare in the corpus. It's a distributed window
-function (`row_number() over (partition by doc_id order by tfidf desc)`). Terms must be alphabetic,
-3+ letters, in ≥ 2 docs. Node 4 shows them as tags.
 
 How it stays safe: everything is written to `/search/exports/_tmp_v0_<time>/` first. The blocking
 checks run (row counts match Iceberg, no empty/duplicate ids, every doc has a length and a
 PageRank, PageRank sums to 1, no posting points at a missing doc, index **and** PageRank were
-computed from the **current** docs snapshot, ≥ 10 iterations, no orphans in the stemmed index).
-The 2 `[nlp]` checks only print WARN: a stale or missing Word2Vec model disables one optional
-feature, which is no reason to block a search version. Only if all blocking checks pass, `manifest.json`
+computed from the **current** docs snapshot, ≥ 10 iterations). Only if all checks pass, `manifest.json`
 (status OK) and `_SUCCESS` are written, and the folder is **renamed** to `v0`. An HDFS rename is
 atomic, so node4 can never see a half-written export.
 
@@ -191,28 +145,22 @@ mode: incremental
 docs in index: 975
 distinct terms: 36521
 postings (term, doc) rows: 220622
-stemmed index: distinct stems / postings: 27706 / 198039
 ```
 The job looked up the docs snapshot it indexed last time (in `pipeline_runs`), asked Iceberg for
 the diff between that snapshot and the current one (`snapshot_diff` = time travel + hash compare),
-`DELETE`d the postings (both indexes) of those 100 docs, and added new postings for the 50 that still exist.
+`DELETE`d the postings of those 100 docs, and added new postings for the 50 that still exist.
 We checked that this gives **exactly** the same table as a full rebuild (same checksum).
 Run it again: `mode: up-to-date` (idempotent).
 
-## M3-9. Word2Vec, PageRank and export v1
+## M3-9. PageRank and export v1
 
 ```bash
-spark-submit --properties-file ~/spark-config/search.conf \
-    --conf spark.pyspark.driver.python=$HOME/nlp-venv/bin/python \
-    code/node3_compute/word2vec.py --phase 1 2> ~/word2vec-p1.log
 spark-submit --properties-file ~/spark-config/search.conf code/node3_compute/pagerank.py --phase 1 2> ~/pagerank-p1.log
 spark-submit --properties-file ~/spark-config/search.conf code/node3_compute/export.py \
     --phase 1 --version v1 --export-root hdfs://node2:9000/search/exports 2> ~/export-v1.log
 ```
 ✅ PageRank: `N=975 docs, 467 links`, `max/min = 14.08`, `docs tied at the minimum: 548`,
-`fingerprint: 54ee091e74b5` · Word2Vec: vocabulary ~10126 · export: all PASS, `docs / postings / terms: 975 / 220622 / 36521`.
-(If you skip Word2Vec here, the export still succeeds with `WARN [nlp] synonyms built from the
-current docs snapshot`: query expansion then uses the Phase 0 model.)
+`fingerprint: 54ee091e74b5` · export: all PASS, `docs / postings / terms: 975 / 220622 / 36521`.
 Announce **"v1 exported"**. 📸 screenshots.
 
 PageRank is recomputed in full (not incrementally): one changed link can change every rank, and it takes about a minute.
@@ -299,5 +247,4 @@ Then open `http://node3:18080` → the application → *Stages*: sort by *Durati
 | export: `FAIL index built from the current docs snapshot` | Iceberg `docs` changed after the index ran (a new ingest or a rollback): run `build_index.py` and `pagerank.py` again, then export |
 | `.../v0 already exists` | add `--overwrite` (the old one is kept as `_replaced_v0_<time>`) or use a new version name |
 | `ModuleNotFoundError: textproc` on an executor | run from `~/project_search_engine` with the paths shown; the jobs ship `code/common/*.py` themselves |
-| `word2vec.py`: `No module named 'numpy'` | setup §8b not done, or the `--conf spark.pyspark.driver.python=...` line is missing |
 | a job is very slow | `sudo zerotier-cli peers`: RELAY between node2 and node3? Try another network / hotspot |

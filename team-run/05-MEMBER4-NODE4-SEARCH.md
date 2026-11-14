@@ -8,10 +8,8 @@ here. You pull exports from HDFS as a plain client, and switch versions only whe
 **What you must be able to explain:** the BM25 formula and its parameters (k1 = 1.2, b = 0.75);
 the two bugs in the course snippet and how we fixed them; the final score and its normalisation;
 why PageRank pushes "April" down to rank 5; how a version switch can't serve a broken or
-half-copied export. **NLP twists (you demo all of them):** stemming, edit-distance spelling
-correction, Word2Vec expansion with weights, query-aware snippets.
+half-copied export.
 The code: [`app.py`](../code/node4_search/app.py), [`bm25.py`](../code/node4_search/bm25.py),
-[`nlp.py`](../code/node4_search/nlp.py),
 [`serving.py`](../code/node4_search/serving.py), [`pull_export.py`](../code/node4_search/pull_export.py),
 [`static/index.html`](../code/node4_search/static/index.html), and the tokenizer shared with Spark,
 [`common/textproc.py`](../code/common/textproc.py).
@@ -80,12 +78,11 @@ ls -la /serving /serving/v0; cat /serving/CURRENT
 ```
 + hdfs dfs -test -e hdfs://node2:9000/search/exports/v0/_SUCCESS
 + hdfs dfs -get hdfs://node2:9000/search/exports/v0 /serving/.incoming-v0
-verified v0: 1000 docs, 233643 postings, 16/16 checks passed, docs snapshot <Phase 0 id>
+verified v0: 1000 docs, 233643 postings, 13/13 checks passed, docs snapshot <Phase 0 id>
 CURRENT: None -> v0
 service: {'switched': True, 'version': 'v0'}
 ```
-and terminal 1 prints `[serving] now serving v0 (1000 docs, loaded in ...s, nlp {'stem': True,
-'spell': True, 'expand': True, 'smart': True})`.
+and terminal 1 prints `[serving] now serving v0 (1000 docs, loaded in ...s)`.
 
 What `pull_export.py` did, in order (each step can stop the switch):
 1. `_SUCCESS` exists in HDFS? It's the last file Member 3's export writes, so "no `_SUCCESS`" = not finished.
@@ -125,37 +122,6 @@ so `pr = 0.15`: `0.7·1.0 + 0.3·0.15 = 0.745`. March has `bm25 = 0.815` and an 
 almost binary (501 docs at 0.15, 490 at 1.0), so "has an in-link" is worth +0.255. Good viva material:
 it's the spec's formula, working as defined on this data.
 
-## M4-5b. The NLP twists, one by one (on v0)
-
-Every switch is a checkbox in the UI (**NLP extras** row) and a URL parameter. Show each query
-first with everything off (the spec's ranking), then with the switch on. The `q.py` helper takes
-`--opts=`:
-```bash
-q() { ~/search-venv/bin/python ~/project_search_engine/code/node4_search/q.py "$@"; }
-```
-```bash
-q phases 3;  q phases 3 --opts=stem
-q "bubnic plauge" 2;  q "bubnic plauge" 2 --opts=spell
-q river 3 --opts=expand;  q computer 3 --opts=expand;  q king 3 --opts=expand
-q "speed of light" 1;  q "speed of light" 1 --opts=smart
-q "disease spred by fleas" 3 --opts=stem,spell,expand,smart
-```
-(or the UI: `http://localhost:8000/?q=phases&stem=1` and so on; the checkboxes stay in the URL)
-
-| Switch | Show | Expected (measured on v0) | What to say |
-|---|---|---|---|
-| **stemming** `stem=1` | "phases" | 12 → 28 matches (on v1: 12 → 75, the Phase 1 pages say "phase") | Porter stemmer (1980) in `textproc.py`; Spark built a 2nd index of stems (`postings_stem`); the query is stemmed the same way |
-| **did you mean** (always) / **auto-correct** `spell=1` | "bubnic plauge", "computr sciense" | 0 results + *Did you mean bubonic plague?* → with `spell=1`: Bubonic plague first | Norvig-style: all strings 1–2 edits away, keep those in the index vocabulary, pick the most frequent (highest df). Known words are never changed |
-| **Word2Vec expansion** `expand=1` | "river", "computer", "king" | chips *danube, yangtze* / *hardware, computers* / *queen, consort*; more matches | neighbours from Member 3's Spark MLlib model, added at weight 0.3 × similarity. "king" → *Queen* can move up: that's **query drift**, the price of recall |
-| **smart snippets** `smart=1` | "speed of light" | "*The biggest **speed** is the **speed** of **light**.*" instead of the article's first line | best sentence = most distinct query words; highlights by stem when stemming is on. The keyword tags (TF-IDF, from Spark) are always shown |
-
-All on together: "disease spred by fleas" + all 4 boxes → *showing results for disease spread by
-fleas*, plus Word2Vec expansion words, then *Bubonic plague* and *Flea* on top with
-highlighted sentences, ~30 ms. 📸 screenshot the UI for 3 of these (before/after).
-
-`curl -s localhost:8000/api/health` shows which twists the loaded version supports (`"nlp": {...}`).
-If one says `false`, its checkbox is greyed out: e.g. `expand` if Member 3 didn't run `word2vec.py`.
-
 ---
 
 ## Phase 1
@@ -166,7 +132,7 @@ If one says `false`, its checkbox is greyed out: e.g. `expand` if Member 3 didn'
 q april; q "alan turing"     # before, still v0
 ~/search-venv/bin/python pull_export.py --version v1 --source hdfs://node2:9000/search/exports --serving /serving
 q "bubonic plague"; q "alan turing"; q april; q phase; q "computer science"
-curl -s "localhost:8000/api/search?q=phases&k=3&stem=1" | python3 -m json.tool | grep -E '"(matches|title)"'
+curl -s "localhost:8000/api/search?q=phase&k=3" | python3 -m json.tool | grep -E '"(matches|title)"'
 ```
 ✅ `CURRENT: v0 -> v1`, `switched: True`, 975 docs (📸 screenshot):
 
@@ -176,7 +142,6 @@ curl -s "localhost:8000/api/search?q=phases&k=3&stem=1" | python3 -m json.tool |
 | alan turing | Alan Turing (13) is **gone** (DELETED in Phase 1); top is now List of mathematicians (3433) |
 | april | 66 matches instead of 71; April (1) is gone |
 | phase | 69 matches (was 20): the 25 ADDED pages ("Phase 1 Added Page N") and the 25 updated ones now match |
-| phases, `stem=1` | 75 matches (12 without stemming): Phases of the Moon, Contact network (Phase 1), Phase 1 Added Page 1 |
 | computer science | 174 matches; "Computer science (Phase 1)" (110) |
 
 The service never stopped: queries kept working during the switch (the swap is one assignment under a lock).
@@ -229,7 +194,3 @@ Stop uvicorn (Ctrl+C), then `rm -rf /serving/* /serving/.[!.]*`, and start it ag
 - *Why load everything into memory?* 975 docs and 220 k postings are a few tens of MB in pandas.
   A query takes a few milliseconds and needs no Spark.
 - *Repeated query words?* Counted once (`dict.fromkeys`), the usual BM25 practice.
-- *Why are the NLP twists off by default?* The spec fixes the ranking formula. With everything off
-  we return exactly that; each twist is an add-on you can switch on and compare.
-- *Why does spell-correction use df?* Among candidates at the same edit distance, the more common
-  word is the likelier intent, and it is guaranteed to have results.

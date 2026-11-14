@@ -3,14 +3,13 @@
 A mini-Google across **4 VMs on ZeroTier**: documents are ingested, validated and versioned in
 **Apache Iceberg on HDFS** (replication 2), indexed and ranked with **Spark** (inverted index,
 PageRank), exported as validated Parquet, and served by a **FastAPI** search service whose score is
-`0.7 · BM25/max + 0.3 · PageRank/max`. On top of the spec: four optional NLP switches
-(stemming, did-you-mean, Word2Vec query expansion, smart snippets + keywords).
+`0.7 · BM25/max + 0.3 · PageRank/max`.
 
 | Node | Member | Runs |
 |---|---|---|
 | node1 | 1 | ingestion (Spark driver, HDFS client) |
 | node2 | 2 | HDFS NameNode + DataNode, Spark worker, the Iceberg lakehouse |
-| node3 | 3 | Spark master + worker, DataNode; index, Word2Vec, PageRank, export |
+| node3 | 3 | Spark master + worker, DataNode; index, PageRank, export |
 | node4 | 4 | FastAPI search service + UI |
 
 ## Start here
@@ -34,11 +33,11 @@ PageRank), exported as validated Parquet, and served by a **FastAPI** search ser
 
 | Path | Contents |
 |---|---|
-| `code/common/` | `textproc.py` (wiki markup → terms, Porter stemmer), `lake.py` (Iceberg helpers) |
+| `code/common/` | `textproc.py` (wiki markup → terms), `lake.py` (Iceberg helpers) |
 | `code/node1_ingestion/` | `ingest.py`: parse, validate, dedupe, `MERGE INTO`, change detection from Iceberg snapshots |
 | `code/node2_storage/` | `lake_report.py`: tables, snapshots, history, tags, rejects, run log |
-| `code/node3_compute/` | `build_index.py`, `word2vec.py`, `pagerank.py`, `export.py` |
-| `code/node4_search/` | `app.py` (FastAPI), `bm25.py`, `nlp.py`, `pull_export.py`, `q.py`, `static/index.html` |
+| `code/node3_compute/` | `build_index.py`, `pagerank.py`, `export.py` |
+| `code/node4_search/` | `app.py` (FastAPI), `bm25.py`, `pull_export.py`, `q.py`, `static/index.html` |
 | `code/tools/` | `doctor.sh` (network/daemons), `check_prereqs.sh`, `cluster_check.py`, `netmeter.sh` |
 | `data/` | `phase-0/pages.jsonl` (corpus), `phase-1/changes.json` (change set), `toy/` |
 | `team-run/` | the runbooks |
@@ -46,7 +45,7 @@ PageRank), exported as validated Parquet, and served by a **FastAPI** search ser
 ## Status
 
 Tested end to end on one laptop (Spark local mode, a 2-worker standalone cluster, real HDFS). Both
-phases, killing an executor mid-PageRank, a broken export being refused, an Iceberg rollback, and
-all NLP switches work. **Not yet run on the 4 real VMs**, so expect network/VM issues and
+phases, killing an executor mid-PageRank, a broken export being refused, and an Iceberg rollback
+all work. **Not yet run on the 4 real VMs**, so expect network/VM issues and
 start any debugging from `code/tools/doctor.sh`.
 Pinned versions: Ubuntu 24.04, Java 11, Hadoop 3.3.6, Spark 3.3.4 (Python 3.10), Iceberg 1.8.1.

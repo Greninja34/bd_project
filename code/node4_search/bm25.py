@@ -18,14 +18,11 @@ import math
 import numpy as np
 
 
-def compute_bm25(query_terms, docs_df, index_df, k1=1.2, b=0.75, weights=None):
+def compute_bm25(query_terms, docs_df, index_df, k1=1.2, b=0.75):
     """
     query_terms: list of already-tokenized terms (textproc.tokenize)
     docs_df:     pandas DataFrame indexed by doc_id, with column 'length'
     index_df:    pandas DataFrame indexed by term (sorted), columns ['doc_id', 'tf', 'df']
-    weights:     optional {term: weight}; default 1.0 per term. Used by the NLP twist "query
-                 expansion": Word2Vec neighbours are added with a weight below 1, so they can help
-                 a doc but never count as much as a word the user actually typed.
     returns:     {doc_id: bm25_score} for docs matching at least one term
     """
     n_docs = len(docs_df)
@@ -40,8 +37,6 @@ def compute_bm25(query_terms, docs_df, index_df, k1=1.2, b=0.75, weights=None):
         tf = rows["tf"].to_numpy(dtype=float)
         doc_len = docs_df["length"].reindex(rows["doc_id"]).to_numpy(dtype=float)   # fix 1
         part = idf * (tf * (k1 + 1.0)) / (tf + k1 * (1.0 - b + b * (doc_len / avgdl)))
-        if weights:
-            part = part * weights.get(term, 1.0)
         for doc_id, s in zip(rows["doc_id"], part):
             scores[doc_id] = scores.get(doc_id, 0.0) + float(s)                      # fix 2
     return scores

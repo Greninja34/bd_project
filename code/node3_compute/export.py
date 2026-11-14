@@ -4,10 +4,8 @@
         --version v0 --export-root hdfs://node2:9000/search/exports
 
 Writes, in HDFS:
-    <root>/<version>/docs/      Parquet: doc_id, url, title, length, pagerank, snippet, body, keywords
+    <root>/<version>/docs/      Parquet: doc_id, url, title, length, pagerank, snippet
     <root>/<version>/postings/  Parquet: term, doc_id, tf, df
-    <root>/<version>/postings_stem/  Parquet: the same with Porter stems   (NLP twist)
-    <root>/<version>/synonyms/  Parquet: term, neighbour, similarity, rank (NLP twist, if word2vec.py ran)
     <root>/<version>/manifest.json   counts, snapshot ids, ranking parameters, every check's result
     <root>/<version>/_SUCCESS        written LAST: "this export is complete and valid"
 
@@ -99,25 +97,6 @@ def main():
     out_post = (spark.table(t("postings"))
                 .withColumn("df", F.count(F.lit(1)).over(w).cast("int"))
                 .select("term", "doc_id", "tf", "df").cache())
-    # NLP twist: the stemmed index, same shape
-    out_post_s = (spark.table(t("postings_stem"))
-                  .withColumn("df", F.count(F.lit(1)).over(w).cast("int"))
-                  .select("term", "doc_id", "tf", "df").cache())
-    # NLP twist: top-5 keywords per doc by TF-IDF = (tf / length) * ln(N / df), computed in Spark.
-    # Only alphabetic terms of 3+ letters that occur in at least 2 docs (skips typos and numbers).
-    n_all = docs.count()
-    kw = (out_post.join(stats.select("doc_id", "length"), "doc_id")
-          .where(F.col("term").rlike("^[a-z]{3,}$") & (F.col("df") >= 2))
-          .withColumn("tfidf", (F.col("tf") / F.col("length")) * F.log(F.lit(n_all) / F.col("df")))
-          .withColumn("r", F.row_number().over(Window.partitionBy("doc_id")
-                                                .orderBy(F.desc("tfidf"), "term")))
-          .where("r <= 5")
-          .groupBy("doc_id").agg(F.sort_array(F.collect_list(F.struct(F.col("r"), F.col("term"))))
-                                 .alias("kw"))
-          .select("doc_id", F.col("kw.term").alias("keywords")))
-    out_docs = out_docs.join(kw, "doc_id", "left").cache()
-    syn_ok = lake.table_exists(spark, "synonyms")
-    w2v_run = lake.last_run(spark, "word2vec")
     if args.simulate_failure:
         print("[export] --simulate-failure: dropping PageRank for 5 docs and adding a posting for a missing doc")
         victims = [r[0] for r in out_docs.orderBy("doc_id").limit(5).collect()]
@@ -134,7 +113,6 @@ def main():
     checks = []
 
     def check(name, ok, detail, level="error"):
-        # level "warn" = reported but does not block the export (used for the optional NLP extras)
         checks.append({"check": name, "ok": bool(ok), "detail": str(detail), "level": level})
 
     check("docs exported = docs in Iceberg table", n_docs == n_docs_tbl, f"{n_docs} vs {n_docs_tbl}")
@@ -154,10 +132,6 @@ def main():
     check("every posting points at an exported doc", n_orphan == 0, f"{n_orphan} orphan postings")
     n_bad_tf = out_post.where((F.col("tf") <= 0) | F.col("tf").isNull()).count()
     check("tf > 0", n_bad_tf == 0, n_bad_tf)
-    n_orphan_s = out_post_s.join(out_docs.select("doc_id"), "doc_id", "left_anti").count()
-    n_post_s = out_post_s.count()
-    check("stemmed index: every posting points at an exported doc", n_orphan_s == 0 and n_post_s > 0,
-          f"{n_orphan_s} orphans, {n_post_s} postings")
     check("index built from the current docs snapshot",
           idx_run is not None and idx_run["docs_snapshot_id"] == snap,
           f"index used {idx_run and idx_run['docs_snapshot_id']}, current is {snap}")
@@ -166,24 +140,12 @@ def main():
           f"pagerank used {pr_run and pr_run['docs_snapshot_id']}, current is {snap}")
     pr_iters = json.loads(pr_run["details"]).get("iterations", 0) if pr_run else 0
     check("PageRank ran >= 10 iterations", pr_iters >= 10, pr_iters)
-    check("[nlp] keywords for every doc", out_docs.where(F.col("keywords").isNull()).count() == 0,
-          out_docs.where(F.col("keywords").isNull()).count(), "warn")
-    check("[nlp] synonyms built from the current docs snapshot",
-          syn_ok and w2v_run is not None and w2v_run["docs_snapshot_id"] == snap,
-          (f"word2vec used {w2v_run['docs_snapshot_id']}, current is {snap}" if w2v_run
-           else "word2vec.py not run: query expansion will be unavailable"), "warn")
     ok = all(c["ok"] for c in checks if c["level"] == "error")
 
     # ---- write -----------------------------------------------------------------------------------
-    out_docs.select("doc_id", "url", "title", "length", "pagerank", "snippet", "body", "keywords") \
+    out_docs.select("doc_id", "url", "title", "length", "pagerank", "snippet") \
             .coalesce(1).write.mode("overwrite").parquet(f"{tmp}/docs")
     out_post.orderBy("term", "doc_id").coalesce(1).write.mode("overwrite").parquet(f"{tmp}/postings")
-    out_post_s.orderBy("term", "doc_id").coalesce(1).write.mode("overwrite").parquet(f"{tmp}/postings_stem")
-    n_syn = 0
-    if syn_ok:
-        syn = spark.table(t("synonyms")).select("term", "neighbour", "similarity", "rank")
-        n_syn = syn.count()
-        syn.coalesce(1).write.mode("overwrite").parquet(f"{tmp}/synonyms")
     avgdl = out_docs.agg(F.avg("length")).collect()[0][0]
     files = [{"path": "/".join(p.rsplit("/", 2)[-2:]), "bytes": n}     # e.g. docs/part-00000-....parquet
              for p, n in fs.files(tmp) if p.endswith(".parquet")]
@@ -192,10 +154,7 @@ def main():
         "phase": args.phase, "docs_snapshot_id": snap,
         "links_snapshot_id": lake.current_snapshot(spark, "links"),
         "counts": {"docs": n_docs, "postings": n_post,
-                   "terms": out_post.select("term").distinct().count(),
-                   "postings_stem": n_post_s, "synonyms": n_syn},
-        "nlp": {"stem_index": True, "keywords": True, "body": True, "synonyms": n_syn > 0,
-                "synonyms_docs_snapshot_id": w2v_run and w2v_run["docs_snapshot_id"]},
+                   "terms": out_post.select("term").distinct().count()},
         "avgdl": avgdl, "pagerank_sum": pr_sum,
         "ranking": {"k1": K1, "b": B, "w_bm25": W_BM25, "w_pagerank": W_PR,
                     "damping": json.loads(pr_run["details"]).get("damping") if pr_run else None,

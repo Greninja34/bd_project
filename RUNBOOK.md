@@ -1,6 +1,6 @@
 # RUNBOOK: the call script
 
-One ordered timeline. Read top to bottom; do the step whose heading names your node, in order. Nothing is explained here: what each step does and what you must say about it is in [VIVA.md](VIVA.md) (per member, by step id). Stuck: run `bash ~/bd_project/scripts/doctor.sh` and paste the output in the chat, then [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+One ordered timeline. Read top to bottom; do the step whose heading names your node, in order. Nothing is explained here: what each step does and what you must say about it is in [VIVA.md](VIVA.md) (per member, by step id). This file is the **setup and the first full run** (do it once as a rehearsal). The live show for the examiner is [DEMO.md](DEMO.md): the same commands in presentation order, each marked with the RUNBOOK step it comes from. Stuck: run `bash ~/bd_project/scripts/doctor.sh` and paste the output in the chat, then [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
 - **Terminal opener** (first thing in every terminal, on every node; works after S04):
   ```bash

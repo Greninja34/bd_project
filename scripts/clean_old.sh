@@ -63,16 +63,20 @@ if command -v jps >/dev/null 2>&1; then
     for p in $OLD_PIDS; do kill -0 "$p" 2>/dev/null && kill -9 "$p" 2>/dev/null; done
   fi
 fi
-pgrep -f "uvicorn app:app" >/dev/null 2>&1 && { item "old uvicorn search service"; [ "$DO" = 1 ] && pkill -f "uvicorn app:app"; }
+for pid in $(pgrep -f "uvicorn app:app" 2>/dev/null); do      # only a search service started from a node4_search folder
+  case "$(readlink "/proc/$pid/cwd" 2>/dev/null)" in
+    */node4_search) [ -d "$SELF/state" ] && tr '\0' ' ' < "/proc/$pid/environ" 2>/dev/null | grep -q "$SELF/state" && continue
+                    item "old uvicorn search service (pid $pid)"; [ "$DO" = 1 ] && kill "$pid" ;;
+  esac
+done
 
 say "== 2. folders of the previous attempt"
 rm_path "$HOME/project_search_engine"        # the old clone name used by the old guides
 rm_path "$HOME/search-venv"                  # old Member-4 venv
 rm_path "$HOME/nlp-venv"
 rm_path "$HOME/solo"                         # old solo-practice folder
-rm_path "$HOME/spark-config"                 # old ~/spark-config/search.conf (+ iceberg.conf from course: recreated by us if needed)
+rm_path "$HOME/spark-config/search.conf"      # old cluster config. The course keeps its own iceberg.conf in that folder: left alone
 rm_path "$HOME/incoming"                     # old scp fallback folder
-rm_path "$HOME/v0" ; rm_path "$HOME/v1"
 rm_path /serving                             # old serving folder (ours is state/serving)
 for f in "$HOME"/ingest-p*.log "$HOME"/index-p*.log "$HOME"/pagerank-*.log "$HOME"/export-*.log; do rm_path "$f"; done
 rm_path /tmp/spark-derby-"$USER"
@@ -96,7 +100,9 @@ if grep -qE '# >>> (team32|bd_project)' /etc/hosts 2>/dev/null; then
 fi
 # 3b. course Hadoop config that the old guide overwrote (it saved the originals as *.single-node)
 for f in core-site.xml hdfs-site.xml; do
-  if [ -f "$HC/$f.single-node" ]; then
+  # restore only a real single-node backup (it points at localhost); a backup that already holds the
+  # cluster config (the old guide re-saved it on a second run) is left alone
+  if [ -f "$HC/$f.single-node" ] && { [ "$f" != core-site.xml ] || grep -q "localhost" "$HC/$f.single-node"; }; then
     item "restore $HC/$f from $f.single-node"
     [ "$DO" = 1 ] && { cp "$HC/$f.single-node" "$HC/$f" 2>/dev/null || sudo cp "$HC/$f.single-node" "$HC/$f"; }
   fi

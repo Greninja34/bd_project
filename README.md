@@ -30,6 +30,7 @@ There is no wrapper program: you type the real `hdfs`, `spark-submit`, `spark-sq
 | [RUNBOOK.md](RUNBOOK.md) | **The call script.** One ordered timeline S01..S70: only the real commands, the numbers to expect, what to say in the chat, a GATE after every stage |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | By symptom or error text: cause and exact fix. Includes node3 on WSL2 |
 | [VIVA.md](VIVA.md) | Expected numbers, design decisions, limitations, viva questions, and section 7: what every RUNBOOK step does, per member (by step id) |
+| [DEMO.md](DEMO.md) | Demo day: what to prepare, what to show in which order, who shows it, and what to do if something breaks |
 
 ## What is in the repo
 

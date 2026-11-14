@@ -16,7 +16,7 @@ Pinned versions: Ubuntu 24.04, Java 11, Hadoop 3.3.6, Spark 3.3.4 (Python 3.10),
 ```bash
 git clone https://github.com/Greninja34/bd_project.git ~/bd_project
 ```
-Then follow [RUNBOOK.md](RUNBOOK.md): **one ordered call script** (S01, S02, ...). Every step names its node and member; the quick index at its top lists "my steps" per member. After each stage there is a **GATE** (`bash ~/bd_project/scripts/check.sh <stage>`) that must print `GATE <stage> PASSED` before anyone continues. Something broke? `bash ~/bd_project/scripts/doctor.sh` and paste the output in the group chat. Every later terminal starts with:
+Then follow [RUNBOOK.md](RUNBOOK.md): **one ordered call script** (S01, S02, ...). Every step names its node and member; the quick index at its top lists "my steps" per member. After each stage there is a **GATE** (`scripts/check.sh <stage>`) that must print `GATE <stage> PASSED` before anyone continues. Something broke? `bash ~/bd_project/scripts/doctor.sh` and paste the output in the group chat. Every later terminal starts with:
 ```bash
 source ~/bd_project/venv/bin/activate
 cd ~/bd_project
@@ -36,7 +36,7 @@ There is no wrapper program: you type the real `hdfs`, `spark-submit`, `spark-sq
 
 | Path | Contents |
 |---|---|
-| `scripts/` | `env.sh` (loaded by `activate`: node detection, config dirs) · `check.sh <stage>` (read-only GATE before the next stage) · `doctor.sh` (read-only, run it when something breaks and paste the output in the chat) · `netcheck.py` (optional port/bandwidth diagnostic) |
+| `scripts/` | `env.sh` (loaded by `activate`: node detection, config dirs) · `clean_old.sh` (run once per VM before the RUNBOOK: removes the previous attempt's code and config; dry run unless `--yes`) · `check.sh <stage>` (read-only GATE before the next stage) · `doctor.sh` (read-only, run it when something breaks and paste the output in the chat) · `netcheck.py` (optional port/bandwidth diagnostic) |
 | `team.env` | the one team settings file (ZeroTier IPs) |
 | `code/common/` | `textproc.py` (wiki markup to terms), `lake.py` (Iceberg helpers) |
 | `code/node1_ingestion/` | `ingest.py`: parse, validate, dedupe, `MERGE INTO`, change detection from Iceberg snapshots |

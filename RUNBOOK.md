@@ -15,10 +15,10 @@ One ordered timeline. Read top to bottom; do the step whose heading names your n
 
 | Member | Node | My step ids (gates in **bold**) |
 |---|---|---|
-| M1 | node1 | S01, S03, S04, S05, S06, S07, S08, S09, S10, **S12**, S12a, S14, S15, **S17**, **S22**, **S25**, S26, S29, S30, S31, **S32**, S41, S42, **S43**, **S66**, **S70** |
-| M2 | node2 | S01, S03, S04, S05, S06, S07, S08, S09, S10, S11, **S12**, S12a, S14, S15, **S17**, S18, S19, S20, **S22**, S24, **S25**, **S32**, **S36**, S39, **S43**, **S47**, S49, S52, S57, S59, S62, S64, **S66**, S69, **S70** |
-| M3 | node3 | S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, **S12**, S12a, S13, S16, **S17**, S21, **S22**, S23, **S25**, S27, S33, S34, S35, **S36**, S44, S45, S46, **S47**, S51, S53, S54, S60, S61, S63, S65, **S66**, S68, **S70** |
-| M4 | node4 | S01, S03, S04, S05, S06, S07, S09, **S12**, S12a, S14, **S17**, **S22**, S28, S37, S38, **S40**, S48, **S50**, S55, S56, S58, **S66**, S67, **S70** |
+| M1 | node1 | S01, S01a, S03, S04, S05, S06, S07, S08, S09, S10, **S12**, S12a, S14, S15, **S17**, **S22**, **S25**, S26, S29, S30, S31, **S32**, S41, S42, **S43**, **S66**, **S70** |
+| M2 | node2 | S01, S01a, S03, S04, S05, S06, S07, S08, S09, S10, S11, **S12**, S12a, S14, S15, **S17**, S18, S19, S20, **S22**, S24, **S25**, **S32**, **S36**, S39, **S43**, **S47**, S49, S52, S57, S59, S62, S64, **S66**, S69, **S70** |
+| M3 | node3 | S01, S01a, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, **S12**, S12a, S13, S16, **S17**, S21, **S22**, S23, **S25**, S27, S33, S34, S35, **S36**, S44, S45, S46, **S47**, S51, S53, S54, S60, S61, S63, S65, **S66**, S68, **S70** |
+| M4 | node4 | S01, S01a, S03, S04, S05, S06, S07, S09, **S12**, S12a, S14, **S17**, **S22**, S28, S37, S38, **S40**, S48, **S50**, S55, S56, S58, **S66**, S67, **S70** |
 
 ---
 
@@ -34,6 +34,13 @@ spark-submit --version 2>&1 | grep -m1 "version"     # 3.3.4         (nodes 1-3 
 sudo apt install -y git python3-venv netcat-openbsd  # node4 needs git + python3-venv; everyone needs nc
 ```
 ✅ expect: the four versions above. If python3.10 is at `/usr/local/bin`: `sudo ln -s /usr/local/bin/python3.10 /usr/bin/python3.10`.
+
+### S01a · all nodes · Remove the previous attempt (so nothing clashes)
+```bash
+bash ~/bd_project/scripts/clean_old.sh          # dry run: only lists what it found
+bash ~/bd_project/scripts/clean_old.sh --yes    # really removes it (read the list first)
+```
+✅ expect: the second run ends `Done: N item(s) removed`, or `Nothing from the previous attempt found: this machine is clean.` It removes the old `~/project_search_engine`, `~/search-venv`, `~/solo`, `~/spark-config`, `/serving`, old job logs, the old `team32` blocks in `/etc/hosts` and `spark-env.sh`, `SPARK_LOCAL_IP` lines in `~/.bashrc`, restores the course's `core-site.xml`/`hdfs-site.xml` from the `*.single-node` backups, and stops old Hadoop/Spark daemons. It never touches `/opt/hadoop`, `/opt/spark`, Java, ZeroTier or this repo. `--course-hdfs` also deletes `~/hadoop-data` (the course's single-node HDFS data). Afterwards open a NEW terminal.
 
 ### S02 · node3 (Member 3) · WSL2: ZeroTier inside Ubuntu
 ```bash

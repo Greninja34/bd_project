@@ -13,7 +13,7 @@ Every D-step says which RUNBOOK step it comes from, so the expected numbers and 
 
 ## How to read a D-step
 
-- Each command block starts with a label: **`▶ node2 · terminal 1`** = go to that machine, open that terminal, paste only that block.
+- Each command block starts with a label: **`▶ node2`** = go to that machine and paste only that block. A terminal name (A, B, 1, 2) is written **only** where a second terminal is really needed: node4 keeps the service running in terminal A and works in terminal B; in D10 node3 runs the slow PageRank in terminal 1 and the `grep` in terminal 2.
 - **One block = one node.** If a step has two labels, the two members work **in turn** (the order written) or **at the same time** (it says "at the same time"). A node not named in the step does nothing.
 - **say in chat:** = the sentence the next person waits for.
 - **Point at:** = what the speaker shows on the screen and explains to the examiner.
@@ -40,13 +40,13 @@ Spec items: **(1)** ingestion + dirty records + Iceberg, **(2)** inverted index,
 ## D01 · Show the cluster is real (RUNBOOK S22, S25) — node2 and node3, at the same time, then talk
 Who speaks: Member 2 (HDFS part), Member 3 (Spark part). Goal: prove 2 DataNodes and 2 workers across machines.
 
-**▶ node2 · terminal 1** (HDFS: Member 2)
+**▶ node2** (HDFS: Member 2)
 ```bash
 hdfs dfsadmin -report | grep -E "Live datanodes|^Name:"
 ```
 Point at: `Live datanodes (2)` and two `Name:` lines with the **node2 and node3 ZeroTier IPs** (172.23.194.191 and 172.23.10.141). Say: node2 holds the NameNode (the directory) and a DataNode; node3 the second DataNode; replication is 2.
 
-**▶ node3 · terminal 1** (Spark: Member 3)
+**▶ node3** (Spark: Member 3)
 ```bash
 curl -s http://172.23.10.141:8080/json/ | python3 -c "import sys,json; d=json.load(sys.stdin); print([(w['host'], w['state']) for w in d['workers']])"
 ```
@@ -57,24 +57,24 @@ Point at: two workers, both `ALIVE`, one on node2's IP and one on node3's IP (th
 ## D02 · Phase 0 ingestion, and idempotence (1) (RUNBOOK S29-S31) — node1 only
 Who: Member 1. Everyone else watches.
 
-**▶ node1 · terminal 1**
+**▶ node1**
 ```bash
 hdfs dfs -put -f data/phase-0/pages.jsonl /search/input/phase-0/pages.jsonl
 hdfs fsck /search/input/phase-0/pages.jsonl -files -blocks -locations | grep -E "Live_repl|Average block replication"
 ```
 Point at: `Live_repl=2` with two IPs, `Average block replication: 2.0`. Say: the client asks the NameNode where to put each block and streams it to a DataNode, which forwards it to the second one.
 
-**▶ node1 · terminal 1** (the ingest job: Spark driver on node1, tasks run on the workers of node2 and node3)
+**▶ node1** (the ingest job: Spark driver on node1, tasks run on the workers of node2 and node3)
 ```bash
 spark-submit code/node1_ingestion/ingest.py --phase 0 --input hdfs://node2:9000/search/input/phase-0/pages.jsonl 2> state/logs/ingest-p0.log
 ```
 Point at the summary: 1040 lines read, **20 rejected** (`unparseable_json`), **20 duplicates superseded** (last copy wins), **1000 accepted**, **499 links**, ADDED 1000.
 
-**▶ node1 · terminal 1** (look at what was rejected)
+**▶ node1** (look at what was rejected)
 ```bash
 $SQL -e "SELECT phase, reason, count(*) FROM iceberg_catalog.search.rejects GROUP BY phase, reason" 2> state/logs/sql.log
 ```
-**▶ node1 · terminal 1** (run the SAME phase again)
+**▶ node1** (run the SAME phase again)
 ```bash
 spark-submit code/node1_ingestion/ingest.py --phase 0 --input hdfs://node2:9000/search/input/phase-0/pages.jsonl 2> state/logs/ingest-p0.log
 ```
@@ -86,19 +86,19 @@ Point at: `changes merged: 0`, `links table rewritten: False`, and `docs snapsho
 ## D03 · Index, PageRank, export v0 (2, 3) (RUNBOOK S33-S35) — node3 only
 Who: Member 3. Waits for D02's "Phase 0 ingested".
 
-**▶ node3 · terminal 1** (inverted index)
+**▶ node3** (inverted index)
 ```bash
 spark-submit code/node3_compute/build_index.py --phase 0 2> state/logs/index-p0.log
 ```
 Point at: `mode: full`, **37551 terms, 233643 postings**. Say: a Python UDF on the workers tokenizes each doc; the `groupBy(term, doc_id)` is the shuffle.
 
-**▶ node3 · terminal 1** (PageRank)
+**▶ node3** (PageRank)
 ```bash
 spark-submit code/node3_compute/pagerank.py --phase 0 2> state/logs/pagerank-p0.log
 ```
 Point at: 10 iterations, `sum=1.000000` each time, fingerprint **`60a6221350e7`**. Say: dangling rank is spread evenly so the total stays 1.
 
-**▶ node3 · terminal 1** (validate + export)
+**▶ node3** (validate + export)
 ```bash
 spark-submit code/node3_compute/export.py --version v0 --phase 0 --export-root hdfs://node2:9000/search/exports 2> state/logs/export-v0.log
 ```
@@ -133,7 +133,7 @@ Say: `final = 0.7·BM25/max + 0.3·PageRank/max`; April has the best BM25 but no
 ## D05 · Tag the Phase 0 state (1) (RUNBOOK S39) — node2 only
 Who: Member 2. Must happen **before** D06.
 
-**▶ node2 · terminal 1**
+**▶ node2**
 ```bash
 spark-submit code/node2_storage/lake_report.py 2> state/logs/report.log
 $SQL -e "ALTER TABLE iceberg_catalog.search.docs CREATE TAG phase0" 2> state/logs/sql.log
@@ -148,14 +148,14 @@ Point at: `docs 1000 rows | 1 snapshots`, the tag `phase0` pointing at the snaps
 ## D06 · Phase 1 ingestion: the change set (1) (RUNBOOK S41-S42) — node1 only
 Who: Member 1.
 
-**▶ node1 · terminal 1**
+**▶ node1**
 ```bash
 hdfs dfs -put -f data/phase-1/changes.json /search/input/phase-1/changes.jsonl
 spark-submit code/node1_ingestion/ingest.py --phase 1 --input hdfs://node2:9000/search/input/phase-1/changes.jsonl 2> state/logs/ingest-p1.log
 ```
 Point at: 100 lines (50 are DELETE) · detected from Iceberg ADDED/UPDATED/DELETED = **25 / 25 / 50** · docs 1000 → **975** · **7 dangling links dropped**.
 
-**▶ node1 · terminal 1** (what Iceberg recorded, then re-run)
+**▶ node1** (what Iceberg recorded, then re-run)
 ```bash
 $SQL -e "SELECT phase, change_type, count(*) FROM iceberg_catalog.search.doc_changes GROUP BY phase, change_type ORDER BY phase, change_type" 2> state/logs/sql.log
 spark-submit code/node1_ingestion/ingest.py --phase 1 --input hdfs://node2:9000/search/input/phase-1/changes.jsonl 2> state/logs/ingest-p1.log
@@ -168,7 +168,7 @@ Point at: the re-run merges nothing (`changes merged: 0`, same snapshot).
 ## D07 · Phase 1: incremental index, PageRank, export v1 (2, 3) (RUNBOOK S44-S46) — node3 only
 Who: Member 3.
 
-**▶ node3 · terminal 1**
+**▶ node3**
 ```bash
 spark-submit code/node3_compute/build_index.py --phase 1 2> state/logs/index-p1.log
 spark-submit code/node3_compute/pagerank.py --phase 1 2> state/logs/pagerank-p1.log
@@ -204,7 +204,7 @@ Point at: `CURRENT: v0 -> v1` · Alan Turing found before, **gone** after (DELET
 ## D09 · Time travel (1) (RUNBOOK S49) — node2 only
 Who: Member 2.
 
-**▶ node2 · terminal 1**
+**▶ node2**
 ```bash
 $SQL -e "ALTER TABLE iceberg_catalog.search.docs CREATE TAG phase1" 2> state/logs/sql.log
 $SQL -e "ALTER TABLE iceberg_catalog.search.links CREATE TAG phase1" 2> state/logs/sql.log
@@ -225,7 +225,7 @@ spark-submit code/node3_compute/pagerank.py --phase 1 --slow-seconds 3 2> state/
 ```
 **say in chat:** "running". Member 3 watches the screen; when it prints `iter 2` or `iter 3`, tell node2 "kill now".
 
-**▶ node2 · terminal 1** (kills the executor of that job on node2; at the same time node3's job is still running)
+**▶ node2** (kills the executor of that job on node2; at the same time node3's job is still running)
 ```bash
 jps | grep CoarseGrainedExecutorBackend
 kill -9 <that pid>
@@ -243,7 +243,7 @@ Point at: `Lost executor`, `ExecutorLostFailure`, `FetchFailed` in the log, the 
 ## D11 · A broken export never reaches the search (RUNBOOK S54-S55) — node3, then node4
 Who: Member 3, then Member 4.
 
-**▶ node3 · terminal 1**
+**▶ node3**
 ```bash
 spark-submit code/node3_compute/export.py --version v1-broken --phase 1 --simulate-failure --export-root hdfs://node2:9000/search/exports 2> state/logs/export-v1-broken.log
 echo "exit code $?"
@@ -277,7 +277,7 @@ Point at: Alan Turing is back on v0 and gone on v1; each version corresponds to 
 ## D13 · A bad update, and recovery (1) (RUNBOOK S57-S60) — node2, node4, node2, node3, in this order
 Who: Members 2, 4, 2, 3.
 
-**▶ node2 · terminal 1** (someone deletes docs by mistake)
+**▶ node2** (someone deletes docs by mistake)
 ```bash
 $SQL -e "DELETE FROM iceberg_catalog.search.docs WHERE title LIKE 'C%'" 2> state/logs/sql.log
 $SQL -e "SELECT count(*) FROM iceberg_catalog.search.docs" 2> state/logs/sql.log
@@ -290,7 +290,7 @@ python code/node4_search/q.py "computer science"
 ```
 Point at: still answers. Say: node4 serves exported Parquet, never Iceberg directly.
 
-**▶ node2 · terminal 1** (roll back to the good snapshot)
+**▶ node2** (roll back to the good snapshot)
 ```bash
 GOOD=$($SQL -e "SELECT snapshot_id FROM iceberg_catalog.search.docs.refs WHERE name = 'phase1'" 2> state/logs/sql.log); echo "GOOD=$GOOD"
 $SQL -e "CALL iceberg_catalog.system.rollback_to_snapshot('search.docs', $GOOD)" 2> state/logs/sql.log
@@ -300,7 +300,7 @@ $SQL -e "SELECT made_current_at, snapshot_id, is_current_ancestor FROM iceberg_c
 Point at: `GOOD=` a number · count back to **975** · the bad snapshot shows `is_current_ancestor = false`. Say: rollback moves the table pointer; no data file is copied or deleted.
 **say in chat:** "rolled back".
 
-**▶ node3 · terminal 1**
+**▶ node3**
 ```bash
 spark-submit code/node3_compute/build_index.py --phase 1 2> state/logs/index-p1.log
 ```
@@ -311,13 +311,13 @@ Point at: `mode: up-to-date` (the pipeline sees the state from before the mistak
 ## D14 (optional) · A DataNode dies and returns (RUNBOOK S61-S64) — node3, node2, node3, node2
 Who: Members 3 and 2, in this order.
 
-**▶ node3 · terminal 1**
+**▶ node3**
 ```bash
 hdfs --daemon stop datanode
 ```
 **say in chat:** "DataNode stopped".
 
-**▶ node2 · terminal 1** (reads still work; then wait about 90 s)
+**▶ node2** (reads still work; then wait about 90 s)
 ```bash
 hdfs dfs -cat /search/input/phase-0/pages.jsonl | wc -l
 hdfs dfsadmin -report | grep -E "Live datanodes|Dead datanodes"
@@ -326,11 +326,11 @@ hdfs fsck / | grep -E "Under-replicated blocks|Average block replication|Status"
 Point at: 1040 lines (the other copy), `Live 1 / Dead 1`, under-replicated, `Status: HEALTHY`. Say: with only 2 DataNodes there is no third to re-replicate to, so it waits.
 **say in chat:** "node3 dead, start it again".
 
-**▶ node3 · terminal 1**
+**▶ node3**
 ```bash
 hdfs --daemon start datanode
 ```
-**▶ node2 · terminal 1** (about 30 s later: the same `dfsadmin` and `fsck` commands as above)
+**▶ node2** (about 30 s later: the same `dfsadmin` and `fsck` commands as above)
 Point at: `Live datanodes (2)`, `Under-replicated blocks: 0`, replication 2.0.
 
 ---
@@ -338,7 +338,7 @@ Point at: `Live datanodes (2)`, `Under-replicated blocks: 0`, replication 2.0.
 ## D15 (optional) · Where the time and traffic go (RUNBOOK S65) — node3 only
 Who: Member 3.
 
-**▶ node3 · terminal 1**
+**▶ node3**
 ```bash
 ZT_IF=$(ip -o -4 addr show | awk -v ip=$MY_IP '$4 ~ "^"ip"/" {print $2}')
 rx0=$(cat /sys/class/net/$ZT_IF/statistics/rx_bytes); tx0=$(cat /sys/class/net/$ZT_IF/statistics/tx_bytes)

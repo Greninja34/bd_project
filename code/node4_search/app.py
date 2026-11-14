@@ -1,15 +1,15 @@
 """Node 4 - FastAPI search service + UI.  No Spark, no HDFS daemon, no Iceberg: it only reads the
-plain Parquet export that pull_export.py placed in /serving/<version>/.
+plain Parquet export that pull_export.py placed in <serving dir>/<version>/.
 
     cd code/node4_search
-    SERVING_DIR=/serving ~/search-venv/bin/uvicorn app:app --host 0.0.0.0 --port 8000
+    bd serve          (runs: uvicorn app:app --host 0.0.0.0 --port 8000 in this folder)
 
 Endpoints
     GET  /                       the search UI (static/index.html)
     GET  /api/search?q=...&k=10  ranked results: doc_id, url, title, snippet, bm25, pagerank, score
     GET  /api/health             which version is loaded and how many docs
-    GET  /api/versions           every version in /serving and whether it is valid
-    POST /api/admin/reload       re-read /serving/CURRENT and switch to it (if it is valid)
+    GET  /api/versions           every version in the serving dir and whether it is valid
+    POST /api/admin/reload       re-read CURRENT and switch to it (if it is valid)
     POST /api/admin/switch/{v}   switch to version v (e.g. back to v0) and update CURRENT
 
 Switching is safe: the new version is fully loaded and verified first, then swapped in with one
@@ -19,6 +19,7 @@ import os
 import sys
 import threading
 import time
+from contextlib import asynccontextmanager
 
 import pandas as pd
 import pyarrow.parquet as pq
@@ -71,7 +72,18 @@ class LoadedVersion:
         return {"terms": terms, "matches": len(final), "results": out}
 
 
-app = FastAPI(title="Team 32 search")
+@asynccontextmanager
+async def lifespan(_app):
+    name = serving.read_current()
+    if name:
+        try:
+            _switch(name)
+        except Exception as e:
+            print(f"[serving] startup: {e}", flush=True)
+    yield
+
+
+app = FastAPI(title="Team 32 search", lifespan=lifespan)
 _lock = threading.Lock()
 _state = {"current": None, "last_error": None}
 
@@ -92,20 +104,10 @@ def _switch(name):
     return new
 
 
-@app.on_event("startup")
-def _startup():
-    name = serving.read_current()
-    if name:
-        try:
-            _switch(name)
-        except Exception as e:
-            print(f"[serving] startup: {e}", flush=True)
-
-
 def _need():
     cur = _state["current"]
     if cur is None:
-        raise HTTPException(503, f"no version loaded yet ({_state['last_error'] or 'run pull_export.py'})")
+        raise HTTPException(503, f"no version loaded yet ({_state['last_error'] or 'run bd pull vN'})")
     return cur
 
 

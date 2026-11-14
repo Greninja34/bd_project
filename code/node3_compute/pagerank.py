@@ -1,6 +1,6 @@
 """Node 3 - PageRank over the cleaned link graph (search.links), written with RDDs.
 
-    spark-submit --properties-file ~/spark-config/search.conf code/node3_compute/pagerank.py --iterations 10
+    bd pagerank 0 [--slow 3]     (node3; runs: spark-submit code/node3_compute/pagerank.py --phase 0)
 
 The algorithm (d = 0.85, N = number of docs, every doc starts at 1/N):
 

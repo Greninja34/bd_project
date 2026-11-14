@@ -1,6 +1,6 @@
 """Node 3 - build / update the distributed inverted index from the Iceberg docs table.
 
-    spark-submit --properties-file ~/spark-config/search.conf code/node3_compute/build_index.py
+    bd index 0          (node3; runs: spark-submit code/node3_compute/build_index.py --phase 0)
 
 Output tables:
     search.postings       (term, doc_id, tf)      the inverted index; df is computed at export time

@@ -1,0 +1,317 @@
+#!/usr/bin/env bash
+# bd - the one command for this project. `bd help` shows what this node can run, in RUNBOOK order.
+set -euo pipefail
+BD_HOME="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"; export BD_HOME BD_SCRIPT=1
+# shellcheck source=scripts/env.sh
+. "$BD_HOME/scripts/env.sh"
+
+S="$BD_HOME/scripts"
+CODE="$BD_HOME/code"
+EXPORTS=hdfs://node2:9000/search/exports
+LOGDIR="$BD_STATE/logs"
+VENV_PY="$BD_HOME/venv/bin/python"
+
+# command @ nodes that may run it @ usage @ what it does      (RUNBOOK order)
+HELP=(
+  "setup@1234@bd setup@prepare this machine: checks, venv, configs, /etc/hosts, ufw (run again any time)"
+  "doctor@1234@bd doctor@read-only health check of this node"
+  "netcheck@1234@bd netcheck [--seconds N]@run on all 4 nodes at the same time: ports + bulk speed"
+  "hdfs-format@2@bd hdfs-format [--force] [--yes]@ONCE: format HDFS, start the NameNode, create the folders"
+  "start@23@bd start [--keep-old]@start this node's daemons"
+  "status@1234@bd status [--now]@wait until the whole cluster is healthy"
+  "check@13@bd check [--drop]@cluster check: both workers, Python 3.10, Iceberg shared by 2 drivers"
+  "serve@4@bd serve [--fg|stop]@start the search service on :8000"
+  "health@4@bd health@search service status"
+  "ingest@1@bd ingest 0|1 [--missing-links reject]@upload to HDFS and run the ingestion job"
+  "index@3@bd index N [--full]@build the inverted index (phase N)"
+  "pagerank@3@bd pagerank N [--slow S]@PageRank, 10 iterations (--slow S = S s per task, for the kill demo)"
+  "export@3@bd export vN [--phase N] [--simulate-failure] [--overwrite]@validate (13 checks) and export to HDFS"
+  "pull@4@bd pull vN@copy an export from HDFS, verify, switch the service to it"
+  "q@4@bd q \"words\" [k]@search from the terminal"
+  "switch@4@bd switch vN@serve another version already on this node"
+  "report@2@bd report@lakehouse report: tables, snapshots, tags, run log"
+  "tag@2@bd tag NAME@tag the current docs and links snapshots (phase0, phase1)"
+  "sql@123@bd sql \"SELECT ...\"@read-only SQL on the Iceberg tables (runs locally on this node)"
+  "datanode@23@bd datanode stop|start|wipe@stop/start this node's DataNode (demo); wipe = delete its data dir"
+  "meter@1234@bd meter <command...>@run a command and print the MB sent/received on ZeroTier"
+  "logs@1234@bd logs [part-of-name]@newest logs, with known errors and fixes"
+  "stop@1234@bd stop [--old]@stop this node's daemons (--old: the course's old ones)"
+  "reset-lake@2@bd reset-lake [--yes]@delete the Iceberg tables and the exports (start the pipeline over)"
+  "reset-serving@4@bd reset-serving@delete the versions on this node and stop the service"
+)
+
+allowed() {                       # allowed CMD -> 0 if this node may run it
+  local row cmd nodes
+  for row in "${HELP[@]}"; do
+    IFS='@' read -r cmd nodes _ <<<"$row"
+    [ "$cmd" = "$1" ] || continue
+    [ -n "${BD_ANY_NODE:-}" ] && return 0
+    [[ "$nodes" == *"$(bd_nodenum)"* ]] && return 0
+    die "'bd $1' runs on node$(echo "$nodes" | sed 's/./&, node/g; s/, node$//'), but this is $BD_NODE. (Override: BD_ANY_NODE=1 bd $1)"
+  done
+  die "unknown command '$1'. Try: bd help"
+}
+
+help() {
+  local row cmd nodes usage what
+  if [ -n "${BD_NODE:-}" ]; then echo "bd on $BD_NODE ($MY_IP). Commands for this node, in RUNBOOK order:"
+  else echo "bd (no node detected: ZeroTier IP not on this machine). All commands:"; fi
+  echo
+  for row in "${HELP[@]}"; do
+    IFS='@' read -r cmd nodes usage what <<<"$row"
+    if [ -z "${BD_NODE:-}" ] || [[ "$nodes" == *"$(bd_nodenum)"* ]]; then printf '  %-60s %s\n' "$usage" "$what"; fi
+  done
+  echo
+  echo "Guide: RUNBOOK.md   Problems: TROUBLESHOOTING.md   Numbers: VIVA.md"
+}
+
+# Run a Spark job: driver log (stderr) goes to state/logs/<name>.log, the summary stays on screen.
+# On failure: last error lines, the known-error hint, and where to read more.
+spark_job() {                     # spark_job NAME script.py args...   (returns spark-submit's exit code)
+  local name="$1" rc; shift
+  mkdir -p "$LOGDIR"
+  echo "[bd] log: $LOGDIR/$name.log"
+  set +e
+  spark-submit "$@" 2> "$LOGDIR/$name.log" | tee "$LOGDIR/$name.out"
+  rc=${PIPESTATUS[0]}
+  set -e
+  return "$rc"
+}
+
+job_failed() {                    # job_failed NAME rc
+  echo
+  fail "$1 failed (exit $2). Last error lines of $LOGDIR/$1.log:"
+  grep -E "Error|Exception|ERROR|FAIL" "$LOGDIR/$1.log" | tail -6 | cut -c1-220 | sed 's/^/          /' || true
+  bd_known_errors "$LOGDIR/$1.log" || hint "no known error matched: read $LOGDIR/$1.log, then TROUBLESHOOTING.md"
+  exit "$2"
+}
+
+run_job() {                       # run_job NAME script.py args...   (stops the program if it fails)
+  local name="$1" rc=0; shift
+  spark_job "$name" "$@" || rc=$?
+  [ "$rc" = 0 ] || job_failed "$name" "$rc"
+}
+
+expected() { printf '\nEXPECTED: %s\n' "$*"; }
+
+need_venv() { [ -x "$VENV_PY" ] || die "no venv yet: run bd setup"; }
+need_phase() { [[ "${1:-}" =~ ^[0-9]+$ ]] || die "usage: $2"; }
+
+cmd_ingest() {
+  need_phase "${1:-}" "bd ingest 0|1"
+  local ph="$1" local_file hdfs_file; shift
+  if [ "$ph" = 0 ]; then local_file="$BD_HOME/data/phase-0/pages.jsonl"; hdfs_file=/search/input/phase-0/pages.jsonl
+  else local_file="$BD_HOME/data/phase-1/changes.json"; hdfs_file=/search/input/phase-1/changes.jsonl; fi
+  [ -f "$local_file" ] || die "missing $local_file"
+  step "Upload to HDFS"
+  hdfs dfs -put -f "$local_file" "$hdfs_file"
+  hdfs dfs -ls "$(dirname "$hdfs_file")"
+  hdfs fsck "$hdfs_file" -files -blocks -locations 2>/dev/null | grep -E "Live_repl|Average block replication" | cut -c1-200 || true
+  expected "Live_repl=2 with the node2 and node3 IPs, Average block replication 2.0"
+  step "Ingest phase $ph"
+  run_job "ingest-p$ph" "$CODE/node1_ingestion/ingest.py" --phase "$ph" --input "hdfs://node2:9000$hdfs_file" "$@"
+  if [ "$ph" = 0 ]; then
+    expected "first run: lines read 1040, rejected 20 (unparseable_json), duplicates superseded 20, accepted 1000, changes merged 1000, links kept 499, docs 0 -> 1000.
+          run it again: unchanged 1000, changes merged 0, links table rewritten False, same docs snapshot before and after."
+  else
+    expected "first run: lines read 100, accepted 100 (50 DELETE), ADDED/UPDATED/DELETED 25/25/50, docs 1000 -> 975, links kept 467, dangling dropped 7.
+          run it again: unchanged 50, DELETE of a doc that is not in the table 50, changes merged 0, same snapshot."
+  fi
+}
+
+cmd_index() {
+  need_phase "${1:-}" "bd index N [--full]"
+  local ph="$1"; shift
+  run_job "index-p$ph" "$CODE/node3_compute/build_index.py" --phase "$ph" "$@"
+  if [ "$ph" = 0 ]; then expected "mode full, docs 1000, distinct terms 37551, postings 233643, avg/max doc length 461.0 / 13903"
+  else expected "mode incremental (Iceberg says 100 docs changed: UPDATED 25, DELETED 50, ADDED 25), docs 975, terms 36521, postings 220622.
+          run it again: mode up-to-date"; fi
+}
+
+cmd_pagerank() {
+  need_phase "${1:-}" "bd pagerank N [--slow S]"
+  local ph="$1" extra=(); shift
+  while [ $# -gt 0 ]; do
+    case "$1" in --slow) extra+=(--slow-seconds "${2:?--slow needs seconds}"); shift 2 ;; *) extra+=("$1"); shift ;; esac
+  done
+  local name="pagerank-p$ph"
+  [[ " ${extra[*]:-} " == *" --slow-seconds "* ]] && name="pagerank-p$ph-slow"
+  run_job "$name" "$CODE/node3_compute/pagerank.py" --phase "$ph" "${extra[@]}"
+  if [ "$ph" = 0 ]; then expected "N=1000, 499 links, 501 dangling, sum of ranks 1.000000, max/min 0.001752 / 0.000264 (6.65), tied at minimum 501, fingerprint 60a6221350e7"
+  else expected "N=975, 467 links, 508 dangling, sum 1.000000, max/min 0.003926 / 0.000279 (14.08), tied at minimum 548, fingerprint 54ee091e74b5
+          (the same fingerprint, even if an executor was killed during the run)"; fi
+}
+
+cmd_export() {
+  local v="${1:-}"; [[ "$v" =~ ^v[0-9] ]] || die "usage: bd export vN [--phase N] [--simulate-failure] [--overwrite]"
+  shift
+  local args=("$@") sim=0 a
+  [[ " ${args[*]:-} " == *" --phase "* ]] || args+=(--phase "$(echo "$v" | sed 's/^v\([0-9]*\).*/\1/')")
+  for a in "${args[@]}"; do [ "$a" = --simulate-failure ] && sim=1; done
+  local rc=0
+  spark_job "export-$v" "$CODE/node3_compute/export.py" --version "$v" --export-root "$EXPORTS" "${args[@]}" || rc=$?
+  if [ "$sim" = 1 ]; then
+    echo "exit code $rc"; hdfs dfs -ls /search/exports || true
+    expected "3 FAIL lines (5 docs without PageRank, PageRank sum 0.998..., 1 orphan posting), 'VALIDATION FAILED - nothing published', exit code 1, and no $v folder in HDFS (only _failed_${v}_<time>)"
+    return 0
+  fi
+  [ "$rc" = 0 ] || job_failed "export-$v" "$rc"
+  hdfs dfs -ls -R "$EXPORTS/$v" | head -12
+  case "$v" in
+    v0) expected "13 PASS lines, EXPORT v0: OK, docs / postings / terms = 1000 / 233643 / 37551" ;;
+    v1) expected "13 PASS lines, EXPORT v1: OK, docs / postings / terms = 975 / 220622 / 36521" ;;
+  esac
+}
+
+cmd_report() {
+  run_job report "$CODE/node2_storage/lake_report.py"
+  expected "after phase 0: docs 1000 rows | 1 snapshots, links 499, rejects 40, doc_stats 1000, postings 233643, pagerank 1000.
+          after phase 1: docs 975 rows | 2 snapshots (history: append 1000, then overwrite added 975 deleted 1000)"
+}
+
+cmd_sql() {
+  [ $# -ge 1 ] || die 'usage: bd sql "SELECT count(*) FROM iceberg_catalog.search.docs"'
+  mkdir -p "$LOGDIR"
+  # no event log for ad-hoc SQL: it would write a file into HDFS /spark-logs (a 1-replica file if a DataNode is down, E5)
+  if ! spark-sql --master 'local[2]' --conf spark.eventLog.enabled=false -e "$1" 2> "$LOGDIR/sql.log"; then
+    fail "SQL failed. Last lines of $LOGDIR/sql.log:"; tail -5 "$LOGDIR/sql.log" | cut -c1-200 | sed 's/^/          /'
+    bd_known_errors "$LOGDIR/sql.log" || true
+    return 1
+  fi
+}
+
+cmd_tag() {
+  local tag="${1:-}"; [ -n "$tag" ] || die "usage: bd tag NAME   (phase0 or phase1)"
+  cmd_sql "ALTER TABLE iceberg_catalog.search.docs CREATE TAG $tag"
+  cmd_sql "ALTER TABLE iceberg_catalog.search.links CREATE TAG $tag"
+  cmd_sql "SELECT name, type, snapshot_id FROM iceberg_catalog.search.docs.refs"
+  expected "a row '$tag  TAG  <the docs snapshot id printed by the ingest of that phase>'"
+}
+
+cmd_check() {
+  if [ "${1:-}" = --drop ]; then run_job check-drop "$CODE/tools/cluster_check.py" --drop; return; fi
+  run_job check "$CODE/tools/cluster_check.py"
+  expected "tasks on node2 AND node3, python 3.10, 'workers used: node2, node3 -> OK'.
+          The table check.hello has one more row per driver: node1 first (1 row), then node3 (2 rows).
+          Clean up at the end:  bd check --drop"
+}
+
+cmd_datanode() {
+  case "${1:-}" in
+    stop)  hdfs --daemon stop datanode; ok "DataNode stopped (the NameNode marks it dead after ~90 s)" ;;
+    start) hdfs --daemon start datanode; bd_wait_port "$MY_IP" 9866 40 && ok "DataNode up" || fail "DataNode did not open 9866: bd logs" ;;
+    wipe)
+      jps 2>/dev/null | grep -qw DataNode && die "stop it first: bd datanode stop"
+      rm -rf "$BD_STATE/hdfs/datanode"; ok "deleted $BD_STATE/hdfs/datanode (it re-joins the NameNode with a fresh ID on bd start)" ;;
+    *) die "usage: bd datanode stop|start|wipe" ;;
+  esac
+}
+
+cmd_reset_lake() {
+  if [ "${1:-}" != --yes ]; then
+    read -r -p "Delete ALL Iceberg tables (/warehouse) and exports (/search/exports) in HDFS? Type yes: " ans
+    [ "$ans" = yes ] || { echo aborted; return 1; }
+  fi
+  hdfs dfs -rm -r -skipTrash /warehouse/search /warehouse/check '/search/exports/*' 2>/dev/null || true
+  hdfs dfs -ls -R /warehouse /search/exports || true
+  ok "lake is empty. On node4 also run: bd reset-serving"
+}
+
+serve_pid() { cat "$BD_STATE/pids/uvicorn.pid" 2>/dev/null || true; }
+serve_running() { local p; p="$(serve_pid)"; [ -n "$p" ] && kill -0 "$p" 2>/dev/null; }
+
+cmd_serve() {
+  need_venv; mkdir -p "$SERVING_DIR" "$BD_STATE/pids" "$LOGDIR"
+  case "${1:-}" in
+    stop)
+      if serve_running; then kill "$(serve_pid)"; sleep 1; ok "search service stopped"; else ok "search service was not running"; fi
+      return 0 ;;
+    --fg) cd "$CODE/node4_search"; exec "$VENV_PY" -m uvicorn app:app --host 0.0.0.0 --port 8000 ;;
+  esac
+  if serve_running; then ok "search service already running (pid $(serve_pid))"; return 0; fi
+  # (cd first, then background only nohup: `cd x && cmd &` backgrounds a subshell and $! would be ITS pid, so stop would miss uvicorn)
+  ( cd "$CODE/node4_search"; nohup "$VENV_PY" -m uvicorn app:app --host 0.0.0.0 --port 8000 > "$LOGDIR/serve.log" 2>&1 & echo $! > "$BD_STATE/pids/uvicorn.pid" )
+  for _ in $(seq 1 30); do curl -sf localhost:8000/api/health >/dev/null 2>&1 && break; sleep 1; done
+  if curl -sf localhost:8000/api/health >/dev/null 2>&1; then
+    ok "search service up on http://$MY_IP:8000   (log: $LOGDIR/serve.log)"; cmd_health
+    expected '{"status":"no-version", ... "last_error":null}  (before the first bd pull)'
+  else fail "service did not answer on :8000"; tail -8 "$LOGDIR/serve.log" | sed 's/^/          /'; bd_known_errors "$LOGDIR/serve.log" || true; return 1; fi
+}
+
+cmd_health() { curl -s localhost:8000/api/health || die "service not reachable: bd serve"; echo; }
+
+cmd_pull() {
+  local v="${1:-}"; [[ "$v" =~ ^v[0-9] ]] || die "usage: bd pull vN"
+  need_venv
+  local rc=0
+  "$VENV_PY" "$CODE/node4_search/pull_export.py" --version "$v" --source "$EXPORTS" || rc=$?
+  [ "$rc" = 0 ] || { hint "REFUSED means the old version keeps serving. Is the service running (bd serve)? Did node3 export it (bd export $v)?"; return "$rc"; }
+  case "$v" in
+    v0) expected "verified v0: 1000 docs, 233643 postings, 13/13 checks passed;  CURRENT: None -> v0;  service: {'switched': True, 'version': 'v0'}" ;;
+    v1) expected "verified v1: 975 docs, 220622 postings, 13/13 checks passed;  CURRENT: v0 -> v1;  service: {'switched': True, 'version': 'v1'}" ;;
+  esac
+}
+
+cmd_q() { need_venv; "$VENV_PY" "$CODE/node4_search/q.py" "$@"; }
+
+cmd_switch() {
+  local v="${1:-}"; [[ "$v" =~ ^v[0-9] ]] || die "usage: bd switch vN"
+  curl -s -X POST "localhost:8000/api/admin/switch/$v"; echo
+}
+
+cmd_reset_serving() {
+  cmd_serve stop
+  rm -rf "$SERVING_DIR"; mkdir -p "$SERVING_DIR"
+  ok "serving dir is empty. Start again: bd serve"
+}
+
+cmd_logs() {
+  mkdir -p "$LOGDIR"
+  local f n=0 pat="${1:-}"
+  echo "Newest logs (daemons: $LOGDIR/hadoop, $LOGDIR/spark; jobs: $LOGDIR):"
+  # shellcheck disable=SC2012
+  for f in $(ls -t "$LOGDIR"/*.log "$LOGDIR"/hadoop/*.log "$LOGDIR"/hadoop/*.out "$LOGDIR"/spark/*.out 2>/dev/null); do
+    [ -n "$pat" ] && [[ "$f" != *"$pat"* ]] && continue
+    n=$((n + 1)); [ "$n" -gt 8 ] && break
+    printf '\n--- %s (%s)\n' "$f" "$(date -r "$f" '+%H:%M:%S')"
+    tail -3 "$f" | cut -c1-200 | sed 's/^/    /'
+    bd_known_errors "$f" || true
+  done
+  [ "$n" = 0 ] && echo "  no logs yet."
+  return 0
+}
+
+main() {
+  local cmd="${1:-help}"; shift || true
+  case "$cmd" in help|-h|--help) help; return ;; esac
+  bd_need_detected
+  allowed "$cmd"
+  case "$cmd" in
+    setup)         exec bash "$S/setup.sh" "$@" ;;
+    doctor)        exec bash "$S/doctor.sh" "$@" ;;
+    netcheck)      bd_need_detected; exec python3 "$S/netcheck.py" "$@" ;;
+    hdfs-format)   exec bash "$S/hdfs_format.sh" "$@" ;;
+    start)         exec bash "$S/start.sh" "$@" ;;
+    stop)          exec bash "$S/stop.sh" "$@" ;;
+    status)        exec bash "$S/status.sh" "$@" ;;
+    meter)         exec bash "$S/netmeter.sh" "$@" ;;
+    check)         cmd_check "$@" ;;
+    ingest)        cmd_ingest "$@" ;;
+    index)         cmd_index "$@" ;;
+    pagerank)      cmd_pagerank "$@" ;;
+    export)        cmd_export "$@" ;;
+    report)        cmd_report "$@" ;;
+    sql)           cmd_sql "$@" ;;
+    tag)           cmd_tag "$@" ;;
+    datanode)      cmd_datanode "$@" ;;
+    reset-lake)    cmd_reset_lake "$@" ;;
+    serve)         cmd_serve "$@" ;;
+    health)        cmd_health ;;
+    pull)          cmd_pull "$@" ;;
+    q)             cmd_q "$@" ;;
+    switch)        cmd_switch "$@" ;;
+    reset-serving) cmd_reset_serving ;;
+    logs)          cmd_logs "$@" ;;
+  esac
+}
+main "$@"

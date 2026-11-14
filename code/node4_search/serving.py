@@ -1,11 +1,11 @@
 """Loading and validating one export version from the local serving directory (Node 4).
 
-Serving directory layout (default /serving, override with SERVING_DIR):
-    /serving/v0/          a complete, verified export (docs/, postings/, manifest.json, _SUCCESS)
-    /serving/v1/
-    /serving/CURRENT      one line: the version the service should serve, e.g. "v1"
+Serving directory layout (default <repo>/state/serving, override with SERVING_DIR):
+    serving/v0/          a complete, verified export (docs/, postings/, manifest.json, _SUCCESS)
+    serving/v1/
+    serving/CURRENT      one line: the version the service should serve, e.g. "v1"
 
-verify_export() is used twice: by pull_export.py before a version is accepted into /serving,
+verify_export() is used twice: by pull_export.py before a version is accepted into the serving dir,
 and by the service right before it switches to that version. If either check fails, the service
 keeps serving the version it already has.
 """
@@ -14,7 +14,8 @@ import os
 
 import pyarrow.parquet as pq
 
-SERVING_DIR = os.environ.get("SERVING_DIR", "/serving")
+DEFAULT_SERVING = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "state", "serving")
+SERVING_DIR = os.path.normpath(os.environ.get("SERVING_DIR") or DEFAULT_SERVING)
 
 
 class ExportInvalid(Exception):
@@ -49,7 +50,8 @@ def verify_export(path):
     return m
 
 
-def read_current(serving_dir=SERVING_DIR):
+def read_current(serving_dir=None):
+    serving_dir = serving_dir or SERVING_DIR
     try:
         with open(os.path.join(serving_dir, "CURRENT")) as f:
             return f.read().strip() or None
@@ -57,7 +59,8 @@ def read_current(serving_dir=SERVING_DIR):
         return None
 
 
-def write_current(version, serving_dir=SERVING_DIR):
+def write_current(version, serving_dir=None):
+    serving_dir = serving_dir or SERVING_DIR
     """Atomically point CURRENT at `version` (write a temp file, then rename over the old one)."""
     tmp = os.path.join(serving_dir, ".CURRENT.tmp")
     with open(tmp, "w") as f:
@@ -65,7 +68,8 @@ def write_current(version, serving_dir=SERVING_DIR):
     os.replace(tmp, os.path.join(serving_dir, "CURRENT"))
 
 
-def list_versions(serving_dir=SERVING_DIR):
+def list_versions(serving_dir=None):
+    serving_dir = serving_dir or SERVING_DIR
     out = []
     if not os.path.isdir(serving_dir):
         return out

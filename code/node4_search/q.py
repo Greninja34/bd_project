@@ -1,6 +1,6 @@
 """Query the running search service from a terminal, one line per result.
 
-    ~/search-venv/bin/python q.py "bubonic plague" [k] [--service=http://localhost:8000]
+    bd q "bubonic plague" [k]     (runs: python q.py ...) [--service=http://localhost:8000]
 """
 import json
 import sys

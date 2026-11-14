@@ -7,3 +7,5 @@ spark-warehouse/
 .DS_Store
 .vscode/
 .idea/
+venv/
+state/

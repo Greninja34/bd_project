@@ -1,14 +1,13 @@
-"""Node 4 - pull a finished export from HDFS into /serving and switch the service to it.
+"""Node 4 - pull a finished export from HDFS into the serving dir and switch the service to it.
 
-    ~/search-venv/bin/python pull_export.py --version v0 \
-        --source hdfs://node2:9000/search/exports --serving /serving
+    bd pull v0          (runs: python pull_export.py --version v0 --source hdfs://node2:9000/search/exports)
 
 Steps (any failure stops here, and the service keeps serving the version it already has):
   1. is <source>/<version>/_SUCCESS there?        no  -> export not finished, stop
-  2. copy the export to /serving/.incoming-<version>  (hdfs dfs -get: Node 4 is only an HDFS *client*)
+  2. copy the export to <serving>/.incoming-<version>  (hdfs dfs -get: Node 4 is only an HDFS *client*)
   3. verify it locally: manifest status OK, every check passed, file sizes and row counts match
   4. rename .incoming-<version> -> <version>     (atomic on one filesystem)
-  5. point /serving/CURRENT at <version>, then ask the service to reload
+  5. point <serving>/CURRENT at <version>, then ask the service to reload
      if the service refuses it, CURRENT is put back to the previous version
 
 --source can also be a local folder (copied with scp from Node 3), e.g. --source ~/incoming
@@ -35,11 +34,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--version", required=True)
     ap.add_argument("--source", required=True, help="hdfs://node2:9000/search/exports or a local folder")
-    ap.add_argument("--serving", default=os.environ.get("SERVING_DIR", "/serving"))
+    ap.add_argument("--serving", default=None, help="default: $SERVING_DIR or <repo>/state/serving")
     ap.add_argument("--service", default="http://localhost:8000", help="'' to skip the reload call")
     args = ap.parse_args()
-    os.environ["SERVING_DIR"] = args.serving
-    import serving                                    # after SERVING_DIR is set
+    import serving
+    if args.serving:
+        serving.SERVING_DIR = args.serving
+    args.serving = serving.SERVING_DIR
 
     src = args.source.rstrip("/") + "/" + args.version
     is_hdfs = args.source.startswith("hdfs://")

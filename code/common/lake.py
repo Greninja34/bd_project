@@ -1,7 +1,7 @@
 """Small helpers shared by every Spark job: table names, snapshot ids, the run log.
 
 All tables live in the Iceberg catalog `iceberg_catalog` (the name the course guide uses),
-namespace `search`, warehouse on HDFS (see ~/spark-config/search.conf).
+namespace `search`, warehouse on HDFS (see state/conf/spark/spark-defaults.conf, written by `bd setup`).
 
     search.docs          one row per live document (doc_id, url, title, text, out_links, content_hash, ...)
     search.links         cleaned link graph (src, dst): both ends exist, no self links, no duplicates

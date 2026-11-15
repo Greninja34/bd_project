@@ -1,3 +1,51 @@
+RECOVERY: node3 was down, upload showed replication 1. Do these in order.
+Do NOT redo the reset (A1.2). Every command below is safe to run again.
+Opener in every terminal:  source ~/bd_project/venv/bin/activate && cd ~/bd_project
+
+STEP 1 · M3 · node3 · get node3 up (everyone waits)
+  ip -4 -br a | grep 172.23          # must show 172.23.10.141
+  # if missing: sudo zerotier-cli listnetworks ; sudo systemctl restart zerotier-one ; check again
+  hdfs --daemon start datanode
+  start-master.sh
+  start-worker.sh spark://172.23.10.141:7077
+  hdfs dfs -test -d /spark-logs && start-history-server.sh
+  jps                                # DataNode Master Worker HistoryServer
+  -> chat: "node3 up"
+
+STEP 2 · M2 · node2 · node2 complete, whole cluster healthy
+  jps                                # need NameNode DataNode Worker
+  hdfs --daemon start datanode                       # only if missing
+  start-worker.sh spark://172.23.10.141:7077         # only if missing
+  hdfs dfsadmin -report | grep -E "Live datanodes|Dead datanodes|^Name:"
+  bash scripts/check.sh hdfs
+  bash scripts/check.sh spark
+  EXPECT: Live datanodes (2) with 172.23.194.191 and 172.23.10.141, GATE hdfs PASSED, GATE spark PASSED
+  -> chat: "cluster healthy"   (NOBODY continues before this)
+
+STEP 3 · everyone · network
+  for n in node1 node2 node3 node4; do ping -c2 -W3 $n >/dev/null && echo "ping $n ok" || echo "ping $n FAIL"; done
+  bash scripts/check.sh network
+  EXPECT: GATE network PASSED on all 4 (node3 ping alone may fail: WSL drops ICMP; the gate decides)
+
+STEP 4 · M4 · node4 · service up with nothing loaded (A1.3; if done, only the curl)
+  rm -rf ~/bd_project/state/serving && mkdir -p ~/bd_project/state/serving
+  cd ~/bd_project/code/node4_search
+  uvicorn app:app --host 0.0.0.0 --port 8000 2>&1 | tee ~/bd_project/state/logs/serve.log    # terminal A
+  terminal B:  curl -s localhost:8000/health        # "status":"no-version"
+  -> chat: "node4 ready"
+
+STEP 5 · M1 · node1 · upload again (A2.1)
+  hdfs dfs -put -f data/phase-0/pages.jsonl /search/input/phase-0/pages.jsonl
+  hdfs fsck /search/input/phase-0/pages.jsonl -files -blocks -locations | grep -E "Live_repl|Average block replication"
+  EXPECT: Live_repl=2, Average block replication: 2.0   (still 1 -> back to STEP 2)
+
+STEP 6 · continue VERIFY.md at A2.2
+  M1 ingest, re-run, ingest0 gate -> M3 index, PageRank, export v0, gates
+  -> M4 pull v0 + M2 tag (same time) -> M4 pulled/serve gates -> baselines (A2.12) -> shutdown A3 (node4, node3, node2 last)
+  Post each EXPECT result in chat before the next person starts. FAIL anywhere: paste it with the step id.
+
+
+--- old (already applied on node1, node2, node3; do not repeat) : Iceberg jar into $SPARK_HOME/jars ---
 source ~/bd_project/venv/bin/activate
   sudo cp $STATE_DIR/jars/iceberg-spark-runtime-3.3_2.12-1.8.1.jar $SPARK_HOME/jars/
   ls -l $SPARK_HOME/jars/iceberg-spark-runtime-3.3_2.12-1.8.1.jar          # file is there

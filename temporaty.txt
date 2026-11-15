@@ -1,0 +1,5 @@
+source ~/bd_project/venv/bin/activate
+  sudo cp $STATE_DIR/jars/iceberg-spark-runtime-3.3_2.12-1.8.1.jar $SPARK_HOME/jars/
+  ls -l $SPARK_HOME/jars/iceberg-spark-runtime-3.3_2.12-1.8.1.jar          # file is there
+  sed -i '/^spark.jars /d' $STATE_DIR/conf/spark/spark-defaults.conf
+  grep -c "^spark.jars " $STATE_DIR/conf/spark/spark-defaults.conf

@@ -57,6 +57,8 @@ SQL="spark-sql --master local[2] --conf spark.eventLog.enabled=false"      # M1,
 
 Starting point: Phase 1 applied, v1 served, all daemons up. Do **not** format HDFS.
 
+**If the cluster was shut down** (A3 commands, a reboot, or node3's WSL closed): nothing restarts by itself. Run **Part B steps B1-B4** first (network, M2 starts node2, M3 starts node3, gates), then continue here at A0. Skip B5: the service is started in A1.3.
+
 ### A0 · Cluster healthy before anything else (M2 and M3)
 
 **A0.1 · M3 · node3**

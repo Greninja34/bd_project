@@ -24,8 +24,9 @@ Everything needed for tonight, tomorrow morning and the 10-minute TA demo is in 
 **Opener: every member, first thing in every new terminal**
 ```bash
 source ~/bd_project/venv/bin/activate && cd ~/bd_project
-SQL="spark-sql --master spark://172.23.10.141:7077"      # M1, M2, M3 only
+SQL="spark-sql --master local[2] --conf spark.eventLog.enabled=false"      # M1, M2, M3 only
 ```
+`$SQL` is exactly what we used in all our earlier runs: it reads the same Iceberg tables in HDFS, but does not start executors on the cluster. Do **not** use `--master spark://...` for these queries: a cluster SQL session takes all 4 cores, so the next Spark job waits behind it, and each query is much slower over ZeroTier. If a TA asks for the cluster form, it is `spark-sql --master spark://172.23.10.141:7077 -e "..."` (same result).
 
 **TA names → ours**
 
@@ -65,9 +66,10 @@ Starting point: Phase 1 applied, v1 served, all daemons up. Do **not** format HD
 **A1.2 · M2 · node2 · remove everything from Phase 1 and the old exports**
 ```bash
 hdfs dfs -rm -r -skipTrash /warehouse/search /warehouse/check '/serving/*' /search/input/phase-1/changes.jsonl
+hdfs dfs -mkdir -p /serving /search/input/phase-1
 hdfs dfs -ls -R /warehouse /serving /search/input
 ```
-✅ Expect: `/warehouse` and `/serving` empty; `/search/input/phase-0/pages.jsonl` still present.
+✅ Expect: `/warehouse` and `/serving` empty; `/search/input/phase-0/pages.jsonl` still present; `/search/input/phase-1` empty. A `No such file or directory` line for `/warehouse/check` is harmless (that table was already dropped); the other paths are still removed.
 ➡ Then: "lake reset". M4 next.
 
 **A1.3 · M4 · node4 · empty the local serving copy and start the service again**

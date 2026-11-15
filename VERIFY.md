@@ -46,7 +46,7 @@ SQL="spark-sql --master local[2] --conf spark.eventLog.enabled=false"      # M1,
 
 | When | Part | Who |
 |---|---|---|
-| Tonight | **A** reset to Phase 0 and rebuild it, then shut down | M4, M2, M1, M3 |
+| Tonight | **A** check the cluster, reset to Phase 0 and rebuild it, then shut down | M3, M2, M4, M1 |
 | Tomorrow morning | **B** start the cluster, **C** check-list | all |
 | Demo, 0:00 | **D** live Phase 1 and the TA checks | M2, M1, M3, M4 |
 | After a rehearsal | **E** reset | Part A |
@@ -56,6 +56,24 @@ SQL="spark-sql --master local[2] --conf spark.eventLog.enabled=false"      # M1,
 # PART A · Tonight: back to the Phase 0 state, then shut down
 
 Starting point: Phase 1 applied, v1 served, all daemons up. Do **not** format HDFS.
+
+### A0 · Cluster healthy before anything else (M2 and M3)
+
+**A0.1 · M3 · node3**
+```bash
+ip -4 -br a | grep 172.23        # 172.23.10.141 (WSL and ZeroTier up)
+jps                              # DataNode Master Worker HistoryServer
+```
+**A0.2 · M2 · node2**
+```bash
+jps                              # NameNode DataNode Worker
+hdfs dfsadmin -report | grep -E "Live datanodes|Dead datanodes|^Name:"
+bash scripts/check.sh hdfs
+bash scripts/check.sh spark
+```
+✅ Expect: `Live datanodes (2)` with 172.23.194.191 and 172.23.10.141, `GATE hdfs PASSED`, `GATE spark PASSED` (2 workers).
+If anything is missing: fix it with **X1** (end of this file) first. Never start A1 with one DataNode.
+➡ Then (M2): "cluster healthy".
 
 ### A1 · Reset
 
@@ -403,6 +421,50 @@ If a job is still running when time is short, keep talking through the log lines
 # PART E · Reset after a rehearsal
 
 Run **A1** (M4, M2, M4), then **A2** (M1, M3, M4, M2), then redo the baselines (A2.12 and C6). Do not repeat any configuration step on any node: the Iceberg jar is already in `$SPARK_HOME/jars` and the configs are final.
+
+# PART X · If something goes wrong
+
+### X1 · `Live_repl=1`, `Average block replication: 1.0`, or `Live datanodes (1)`
+
+**Cause:** node3's DataNode (or node3 itself) is down, so only node2 holds a copy. Nothing is lost, and nothing has to be redone: HDFS adds the second copy by itself when node3 is back.
+
+**X1.1 · M3 · node3 · bring it back**
+```bash
+ip -4 -br a | grep 172.23        # must show 172.23.10.141; if not, reopen the Ubuntu (WSL) terminal and check ZeroTier
+jps
+hdfs --daemon start datanode
+# only the ones missing from jps:
+start-master.sh
+start-worker.sh spark://172.23.10.141:7077
+hdfs dfs -test -d /spark-logs && start-history-server.sh
+jps                              # DataNode Master Worker HistoryServer
+```
+➡ Then: "node3 up".
+
+**X1.2 · M2 · node2 · two DataNodes again**
+```bash
+hdfs dfsadmin -report | grep -E "Live datanodes|Dead datanodes|^Name:"
+bash scripts/check.sh hdfs
+```
+✅ Expect: `Live datanodes (2)`, `GATE hdfs PASSED`.
+
+**X1.3 · M1 · node1 · replication back to 2 (about 30-60 s later)**
+```bash
+hdfs fsck /search/input/phase-0/pages.jsonl -files -blocks -locations | grep -E "Live_repl|Average block replication"
+hdfs fsck / | grep -E "Under-replicated blocks|Average block replication|Status"
+```
+✅ Expect: `Live_repl=2`, `Average block replication: 2.0`, `Under-replicated blocks: 0`, `Status: HEALTHY`.
+Still 1 after a minute: `hdfs dfs -setrep -R -w 2 /search /warehouse /serving`.
+
+**X1.4 · continue** at the step you stopped at. A job that already finished with one DataNode gave correct results; only re-run a step whose job failed.
+
+Keep node3's Ubuntu window open and Windows awake the whole session: closing it stops WSL, and with it ZeroTier and the DataNode.
+
+### X2 · Any other failure
+```bash
+bash scripts/doctor.sh
+```
+Paste the whole output in the team chat, with the step id you were on.
 
 # PART F · If a TA asks why the jobs are slow
 

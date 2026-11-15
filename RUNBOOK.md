@@ -305,7 +305,7 @@ ls state/hdfs/namenode/current/VERSION
 hdfs --daemon start namenode
 ss -tln | grep :9000
 hdfs dfsadmin -safemode get
-hdfs dfs -mkdir -p /search/input/phase-0 /search/input/phase-1 /search/exports /warehouse /spark-logs
+hdfs dfs -mkdir -p /search/input/phase-0 /search/input/phase-1 /serving /warehouse /spark-logs
 hdfs dfs -ls -R /
 ```
 ✅ expect: `0.0.0.0` or `172.23.194.191:9000` listening, `Safe mode is OFF`, the folder listing 📸. (If `-mkdir` complains about safe mode: wait 30 s and repeat.) ❌ [safemode](TROUBLESHOOTING.md#safemode) · [port-in-use](TROUBLESHOOTING.md#port-in-use)
@@ -389,7 +389,7 @@ Terminal B (opener first):
 curl -s localhost:8000/api/health; echo
 hdfs dfs -ls /search
 ```
-✅ expect: `{"status":"no-version", ... "last_error":null}`; `http://node4:8000` shows *no version loaded*; `hdfs dfs -ls /search` lists `exports` and `input`. ❌ [path-venv](TROUBLESHOOTING.md#path-venv) · [refused-9000](TROUBLESHOOTING.md#refused-9000)
+✅ expect: `{"status":"no-version", ... "last_error":null}`; `http://node4:8000` shows *no version loaded*; `hdfs dfs -ls /search` lists `input` (and `hdfs dfs -ls /serving` works, empty). ❌ [path-venv](TROUBLESHOOTING.md#path-venv) · [refused-9000](TROUBLESHOOTING.md#refused-9000)
 say in chat: "node4 ready".
 
 ---
@@ -446,17 +446,17 @@ spark-submit code/node3_compute/pagerank.py --phase 0 2> state/logs/pagerank-p0.
 
 ### S35 · node3 (Member 3) · Validate and export v0
 ```bash
-spark-submit code/node3_compute/export.py --version v0 --phase 0 --export-root hdfs://node2:9000/search/exports 2> state/logs/export-v0.log
-hdfs dfs -ls -R hdfs://node2:9000/search/exports/v0 | head -12
+spark-submit code/node3_compute/export.py --version v0 --phase 0 --export-root hdfs://node2:9000/serving 2> state/logs/export-v0.log
+hdfs dfs -ls -R hdfs://node2:9000/serving/v0 | head -12
 ```
-✅ expect 📸: 13 × `PASS`, `EXPORT v0: OK`, docs / postings / terms = 1000 / 233643 / 37551, listing with `_SUCCESS`. ❌ [stale-export](TROUBLESHOOTING.md#stale-export) · [exists](TROUBLESHOOTING.md#exists) · [no-resources](TROUBLESHOOTING.md#no-resources)
+✅ expect 📸: 13 × `PASS`, `EXPORT v0: OK`, docs / postings / terms = 1000 / 233643 / 37551, listing with `_READY`. ❌ [stale-export](TROUBLESHOOTING.md#stale-export) · [exists](TROUBLESHOOTING.md#exists) · [no-resources](TROUBLESHOOTING.md#no-resources)
 
 ### S36 · GATE 5 · node3, node2 · index and export v0
 ```bash
 bash ~/bd_project/scripts/check.sh index
 bash ~/bd_project/scripts/check.sh export v0
 ```
-✅ expect: `GATE index PASSED` and `GATE export v0 PASSED` (postings 233643, `manifest.json` status OK, `_SUCCESS`, 13/13 checks). If FAIL → [table-not-found](TROUBLESHOOTING.md#table-not-found) · [export-bad](TROUBLESHOOTING.md#export-bad) · [stale-export](TROUBLESHOOTING.md#stale-export)
+✅ expect: `GATE index PASSED` and `GATE export v0 PASSED` (postings 233643, `manifest.json` status OK, `_READY`, 13/13 checks). If FAIL → [table-not-found](TROUBLESHOOTING.md#table-not-found) · [export-bad](TROUBLESHOOTING.md#export-bad) · [stale-export](TROUBLESHOOTING.md#stale-export)
 say in chat: "v0 exported".
 
 ---
@@ -465,7 +465,7 @@ say in chat: "v0 exported".
 
 ### S37 · node4 (Member 4) · Pull v0 and search it (terminal B; parallel with S39)
 ```bash
-python code/node4_search/pull_export.py --version v0 --source hdfs://node2:9000/search/exports
+python code/node4_search/pull_export.py --version v0 --source hdfs://node2:9000/serving
 python code/node4_search/q.py "bubonic plague"
 python code/node4_search/q.py "alan turing"
 python code/node4_search/q.py april
@@ -544,8 +544,8 @@ spark-submit code/node3_compute/pagerank.py --phase 1 2> state/logs/pagerank-p1.
 
 ### S46 · node3 (Member 3) · Export v1
 ```bash
-spark-submit code/node3_compute/export.py --version v1 --phase 1 --export-root hdfs://node2:9000/search/exports 2> state/logs/export-v1.log
-hdfs dfs -ls -R hdfs://node2:9000/search/exports/v1 | head -12
+spark-submit code/node3_compute/export.py --version v1 --phase 1 --export-root hdfs://node2:9000/serving 2> state/logs/export-v1.log
+hdfs dfs -ls -R hdfs://node2:9000/serving/v1 | head -12
 ```
 ✅ expect 📸: 13 × `PASS`, `EXPORT v1: OK`, docs / postings / terms = 975 / 220622 / 36521.
 
@@ -565,7 +565,7 @@ say in chat: "v1 exported".
 ```bash
 python code/node4_search/q.py april
 python code/node4_search/q.py "alan turing"
-python code/node4_search/pull_export.py --version v1 --source hdfs://node2:9000/search/exports
+python code/node4_search/pull_export.py --version v1 --source hdfs://node2:9000/serving
 python code/node4_search/q.py "bubonic plague"
 python code/node4_search/q.py "alan turing"
 python code/node4_search/q.py april
@@ -623,19 +623,19 @@ grep -oE "Lost executor|ExecutorLostFailure|No more replicas|FetchFailed" state/
 
 ### S54 · node3 (Member 3) · A broken export is refused
 ```bash
-spark-submit code/node3_compute/export.py --version v1-broken --phase 1 --simulate-failure --export-root hdfs://node2:9000/search/exports 2> state/logs/export-v1-broken.log
+spark-submit code/node3_compute/export.py --version v1-broken --phase 1 --simulate-failure --export-root hdfs://node2:9000/serving 2> state/logs/export-v1-broken.log
 echo "exit code $?"
-hdfs dfs -ls /search/exports
+hdfs dfs -ls /serving
 ```
 ✅ expect 📸: 3 `FAIL` lines (`every doc has a PageRank: 5 missing`, `PageRank sums to 1: 0.998...`, `every posting points at an exported doc: 1 orphan postings`), `VALIDATION FAILED - nothing published`, `exit code 1`, in HDFS only `_failed_v1-broken_<time>`.
 say in chat: "broken export made".
 
 ### S55 · node4 (Member 4) · The broken export is refused
 ```bash
-python code/node4_search/pull_export.py --version v1-broken --source hdfs://node2:9000/search/exports; echo "exit code $?"
+python code/node4_search/pull_export.py --version v1-broken --source hdfs://node2:9000/serving; echo "exit code $?"
 curl -s localhost:8000/api/health; echo
 ```
-✅ expect 📸: `REFUSED: ... _SUCCESS not found ... Still serving v1.`, `exit code 1`, health still `"version":"v1"`.
+✅ expect 📸: `REFUSED: ... _READY not found ... Still serving v1.`, `exit code 1`, health still `"version":"v1"`.
 
 ### S56 · node4 (Member 4) · Switch between v0 and v1
 ```bash
@@ -762,7 +762,7 @@ bash ~/bd_project/scripts/check.sh down
 | | node3 | `hdfs --daemon start datanode` · `start-master.sh` · `start-worker.sh spark://172.23.10.141:7077` · `start-history-server.sh` |
 | | node4 | S28 (it loads the last version, `CURRENT`) |
 | | then | `check.sh hdfs` and `check.sh spark` (GATE 2 and 3) |
-| Rehearse from zero (keep HDFS, delete the lake) | node2 | `hdfs dfs -rm -r -skipTrash /warehouse/search /warehouse/check '/search/exports/*'` · `hdfs dfs -ls -R /warehouse /search/exports` |
+| Rehearse from zero (keep HDFS, delete the lake) | node2 | `hdfs dfs -rm -r -skipTrash /warehouse/search /warehouse/check '/serving/*'` · `hdfs dfs -ls -R /warehouse /serving` |
 | | node4 | Ctrl-C the service; `rm -rf ~/bd_project/state/serving && mkdir -p ~/bd_project/state/serving`; start it again (S28) |
 | | then | continue at S29 |
 | Delete everything of ours on a node | that node | stop its daemons, `rm -rf ~/bd_project/state`, redo S08-S10, then format again (S18; the DataNode folder on node3 is gone with `state/`) |

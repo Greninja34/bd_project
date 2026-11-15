@@ -169,8 +169,8 @@ stage_hdfs() {
   if [ "${live:-0}" = 2 ]; then ok "2 live DataNodes"; else fail "live DataNodes: ${live:-0} (need 2)" "start the missing DataNode: hdfs --daemon start datanode on node2 / node3 (RUNBOOK S20, S21)" dn-missing; fi
   [ "$ips" = "$want" ] && ok "DataNodes are $NODE2_IP and $NODE3_IP" || fail "DataNode addresses are '${ips:-none}', want '$want'" "fix /etc/hosts on that node (RUNBOOK S05), restart its DataNode" dn-ip
   hdfs dfsadmin -safemode get 2>&1 | grep -q 'OFF' && ok "safe mode OFF" || fail "safe mode is ON" "wait 30 s; both DataNodes must report" safemode
-  out=$(hdfs dfs -ls -d /search/input/phase-0 /search/input/phase-1 /search/exports /warehouse /spark-logs 2>&1)
-  for d in /search/input/phase-0 /search/input/phase-1 /search/exports /warehouse /spark-logs; do
+  out=$(hdfs dfs -ls -d /search/input/phase-0 /search/input/phase-1 /serving /warehouse /spark-logs 2>&1)
+  for d in /search/input/phase-0 /search/input/phase-1 /serving /warehouse /spark-logs; do
     echo "$out" | grep -q " $d\$" && ok "HDFS folder $d" || fail "HDFS folder $d missing" "hdfs dfs -mkdir -p $d (RUNBOOK S19, on node2)" safemode
   done
   f="/search/.check-$NODE_NAME-$$"
@@ -247,13 +247,13 @@ print("%s|%d|%d|%s|%s|%s" % (m["status"], len(k), sum(1 for x in k if x["ok"]), 
 stage_export() {
   local v=$1
   need_hdfs || return
-  hdfs dfs -test -e "/search/exports/$v/_SUCCESS" && ok "/search/exports/$v/_SUCCESS exists" || fail "/search/exports/$v/_SUCCESS missing" "export did not finish: RUNBOOK S35 / S46" export-bad
-  manifest_check "HDFS export $v" "$v" hdfs dfs -cat "/search/exports/$v/manifest.json"
+  hdfs dfs -test -e "/serving/$v/_READY" && ok "/serving/$v/_READY exists" || fail "/serving/$v/_READY missing" "export did not finish: RUNBOOK S35 / S46" export-bad
+  manifest_check "HDFS export $v" "$v" hdfs dfs -cat "/serving/$v/manifest.json"
 }
 stage_pulled() {
   local v=$1 d="$SERVING_DIR/$1"
   [ -d "$d" ] && ok "$d exists" || { fail "$d does not exist on this node" "pull it: RUNBOOK S37 / S48" serve; return; }
-  [ -f "$d/_SUCCESS" ] && ok "$v/_SUCCESS present" || fail "$v/_SUCCESS missing" "pull again" serve
+  [ -f "$d/_READY" ] && ok "$v/_READY present" || fail "$v/_READY missing" "pull again" serve
   manifest_check "pulled $v" "$v" cat "$d/manifest.json"
   note "CURRENT = $(cat "$SERVING_DIR/CURRENT" 2>/dev/null || echo none)"
 }
@@ -298,7 +298,7 @@ stage_all() {   # whatever applies to this node and to how far the pipeline has 
   if hdfs_up && hdfs dfs -test -d /warehouse/search/docs 2>/dev/null; then
     run ingest0; [ "$(total_of docs)" = 975 ] && run ingest1
     run index
-    for v in v0 v1; do hdfs dfs -test -e "/search/exports/$v/_SUCCESS" 2>/dev/null && run export "$v"; done
+    for v in v0 v1; do hdfs dfs -test -e "/serving/$v/_READY" 2>/dev/null && run export "$v"; done
   fi
   if [ "$NODE_NAME" = node4 ]; then
     for v in v0 v1; do [ -d "$SERVING_DIR/$v" ] && run pulled "$v"; done

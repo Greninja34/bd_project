@@ -20,11 +20,14 @@ Every D-step says which RUNBOOK step it comes from, so the expected numbers and 
 
 ## Before the examiner arrives (state of the cluster at the start of the demo)
 
-Reset to "start over" (RUNBOOK, after S70) **or** a fresh cluster, then:
-- RUNBOOK **S01-S28 done**: HDFS up (2 DataNodes), Spark up (master + 2 workers), `check.sh` gates 0-3 PASSED.
-- **node4**: the search service from S28 is running (terminal A stays open) and the UI at `http://node4:8000` says "no version loaded".
-- HDFS has the five folders; **no tables yet** (the lake is empty), `/search/exports` empty.
-- Tabs open on the projector machine: Spark master `http://172.23.10.141:8080` · history server `:18080` · NameNode `http://node2:9870` · UI `http://node4:8000`.
+**TA rule: the team arrives with Phase 0 already executed and serving. The search service on node4 is already running with the Phase 0 export (v0) in memory. Only Phase 1 is triggered live.** So D02-D05 below are **PRE-DEMO** (run them in the rehearsal, before the examiner arrives, and leave the result in place); the live show starts at **D06**.
+
+Required state when the examiner walks in (verify with the gates):
+- RUNBOOK **S01-S40 done**: HDFS up (2 DataNodes), Spark up (master + 2 workers), Phase 0 ingested (docs 1000), indexed, PageRank done, **v0 exported**, tags `phase0` created on `docs` and `links` (D05), **no Phase 1 tables/changes yet** (`doc_changes` has only phase 0, `/serving` has only `v0`, `/search/input/phase-1` empty).
+- `bash scripts/check.sh all`-style checks for this state: gates **setup, network, hdfs, spark, ingest0, index, export v0** on their nodes, and on node4 `check.sh pulled v0` and `check.sh serve v0` all PASSED.
+- **node4**: the search service (S28) has been running since before the demo (terminal A stays open), health says `"version":"v0"`, 1000 docs, and the UI at `http://node4:8000` answers (do not restart it: that is the "already running, in memory" proof; if it must restart, it reloads `CURRENT` = v0 from `state/serving`).
+- Tabs open on the projector machine: Spark master `http://172.23.10.141:8080` · history server `:18080` · NameNode `http://node2:9870` · UI `http://node4:8000` (a v0 search already on screen).
+- Do **not** re-run S41 (Phase 1 ingest) or later before the examiner. If you rehearsed past S41, reset first (RUNBOOK "Rehearse from zero": drop the lake, redo S29-S40) so Phase 1 is genuinely live.
 
 **Every terminal you open** (all nodes):
 ```bash
@@ -54,7 +57,9 @@ Point at: two workers, both `ALIVE`, one on node2's IP and one on node3's IP (th
 
 ---
 
-## D02 · Phase 0 ingestion, and idempotence (1) (RUNBOOK S29-S31) — node1 only
+> **D02-D05 are done BEFORE the examiner arrives.** Their "say in chat" lines are for the rehearsal; at the demo only show the result if asked.
+
+## D02 · PRE-DEMO · Phase 0 ingestion, and idempotence (1) (RUNBOOK S29-S31) — node1 only
 Who: Member 1. Everyone else watches.
 
 **▶ node1**
@@ -83,7 +88,7 @@ Point at: `changes merged: 0`, `links table rewritten: False`, and `docs snapsho
 
 ---
 
-## D03 · Index, PageRank, export v0 (2, 3) (RUNBOOK S33-S35) — node3 only
+## D03 · PRE-DEMO · Index, PageRank, export v0 (2, 3) (RUNBOOK S33-S35) — node3 only
 Who: Member 3. Waits for D02's "Phase 0 ingested".
 
 **▶ node3** (inverted index)
@@ -100,19 +105,19 @@ Point at: 10 iterations, `sum=1.000000` each time, fingerprint **`60a6221350e7`*
 
 **▶ node3** (validate + export)
 ```bash
-spark-submit code/node3_compute/export.py --version v0 --phase 0 --export-root hdfs://node2:9000/search/exports 2> state/logs/export-v0.log
+spark-submit code/node3_compute/export.py --version v0 --phase 0 --export-root hdfs://node2:9000/serving 2> state/logs/export-v0.log
 ```
-Point at: **13 × PASS**, `EXPORT v0: OK`. Say: written to a temp folder, `_SUCCESS` last, then an atomic rename.
+Point at: **13 × PASS**, `EXPORT v0: OK`. Say: written to a temp folder, `_READY` last, then an atomic rename.
 **say in chat:** "v0 exported".
 
 ---
 
-## D04 · Search the original corpus (5, 6) (RUNBOOK S37-S38) — node4 only
+## D04 · PRE-DEMO (re-show one v0 query live) · Search the original corpus (5, 6) (RUNBOOK S37-S38) — node4 only
 Who: Member 4. Waits for "v0 exported".
 
 **▶ node4 · terminal B** (terminal A keeps the service running)
 ```bash
-python code/node4_search/pull_export.py --version v0 --source hdfs://node2:9000/search/exports
+python code/node4_search/pull_export.py --version v0 --source hdfs://node2:9000/serving
 ```
 Point at: `verified v0: 1000 docs, 233643 postings, 13/13 checks passed`, `CURRENT: None -> v0`, `switched: True`.
 
@@ -130,7 +135,7 @@ Say: `final = 0.7·BM25/max + 0.3·PageRank/max`; April has the best BM25 but no
 
 ---
 
-## D05 · Tag the Phase 0 state (1) (RUNBOOK S39) — node2 only
+## D05 · PRE-DEMO · Tag the Phase 0 state (1) (RUNBOOK S39) — node2 only
 Who: Member 2. Must happen **before** D06.
 
 **▶ node2**
@@ -145,8 +150,8 @@ Point at: `docs 1000 rows | 1 snapshots`, the tag `phase0` pointing at the snaps
 
 ---
 
-## D06 · Phase 1 ingestion: the change set (1) (RUNBOOK S41-S42) — node1 only
-Who: Member 1.
+## D06 · LIVE START · Phase 1 ingestion: the change set (1) (RUNBOOK S41-S42) — node1 only
+Who: Member 1. Before starting, node4 shows one v0 query on screen (e.g. `python code/node4_search/q.py "alan turing"` and `april`) so the examiner sees the "before" state already being served.
 
 **▶ node1**
 ```bash
@@ -172,7 +177,7 @@ Who: Member 3.
 ```bash
 spark-submit code/node3_compute/build_index.py --phase 1 2> state/logs/index-p1.log
 spark-submit code/node3_compute/pagerank.py --phase 1 2> state/logs/pagerank-p1.log
-spark-submit code/node3_compute/export.py --version v1 --phase 1 --export-root hdfs://node2:9000/search/exports 2> state/logs/export-v1.log
+spark-submit code/node3_compute/export.py --version v1 --phase 1 --export-root hdfs://node2:9000/serving 2> state/logs/export-v1.log
 ```
 Point at: "Iceberg says 100 docs changed", **`mode: incremental`** (only those docs re-indexed, from the snapshot diff) · 975 docs · fingerprint **`54ee091e74b5`** · 13 × PASS, `EXPORT v1: OK`.
 **say in chat:** "v1 exported".
@@ -188,7 +193,7 @@ python code/node4_search/q.py "alan turing"
 ```
 **▶ node4 · terminal B** (switch to v1)
 ```bash
-python code/node4_search/pull_export.py --version v1 --source hdfs://node2:9000/search/exports
+python code/node4_search/pull_export.py --version v1 --source hdfs://node2:9000/serving
 ```
 **▶ node4 · terminal B** (same queries, new answers)
 ```bash
@@ -245,7 +250,7 @@ Who: Member 3, then Member 4.
 
 **▶ node3**
 ```bash
-spark-submit code/node3_compute/export.py --version v1-broken --phase 1 --simulate-failure --export-root hdfs://node2:9000/search/exports 2> state/logs/export-v1-broken.log
+spark-submit code/node3_compute/export.py --version v1-broken --phase 1 --simulate-failure --export-root hdfs://node2:9000/serving 2> state/logs/export-v1-broken.log
 echo "exit code $?"
 ```
 Point at: 3 × `FAIL` (5 docs without PageRank, sum 0.998, 1 orphan posting), `VALIDATION FAILED - nothing published`, `exit code 1`.
@@ -253,7 +258,7 @@ Point at: 3 × `FAIL` (5 docs without PageRank, sum 0.998, 1 orphan posting), `V
 
 **▶ node4 · terminal B**
 ```bash
-python code/node4_search/pull_export.py --version v1-broken --source hdfs://node2:9000/search/exports; echo "exit code $?"
+python code/node4_search/pull_export.py --version v1-broken --source hdfs://node2:9000/serving; echo "exit code $?"
 curl -s localhost:8000/api/health; echo
 ```
 Point at: `REFUSED ... Still serving v1`, `exit code 1`, health still `"version":"v1"`. Say: the spec's "keep the previous search version available if export fails".
@@ -349,6 +354,6 @@ Then open `http://node3:18080` → the application → *Stages*. Say: the data i
 
 ---
 
-Time: D01-D13 about 30 min. Cut D14-D15 first if short, never D02-D13.
+Time live: D01 + D06-D13 about 20 min (D02-D05 are done before). Cut D14-D15 first if short, never D06-D13.
 After the demo: shut down in the RUNBOOK order (S67-S70: node4, then node3, then node2).
 Each member must be able to explain their steps: [VIVA.md](VIVA.md) section 7. Likely first question to Member 4 (D04, D08, D11, D12): BM25 with k1 = 1.2, b = 0.75, the two bugs in the course snippet, the final-score normalisation, and why a version switch can't serve a broken export.

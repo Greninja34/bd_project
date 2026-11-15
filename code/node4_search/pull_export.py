@@ -1,9 +1,9 @@
 """Node 4 - pull a finished export from HDFS into the serving dir and switch the service to it.
 
-    python code/node4_search/pull_export.py --version v0 --source hdfs://node2:9000/search/exports
+    python code/node4_search/pull_export.py --version v0 --source hdfs://node2:9000/serving
 
 Steps (any failure stops here, and the service keeps serving the version it already has):
-  1. is <source>/<version>/_SUCCESS there?        no  -> export not finished, stop
+  1. is <source>/<version>/_READY there?        no  -> export not finished, stop
   2. copy the export to <serving>/.incoming-<version>  (hdfs dfs -get: Node 4 is only an HDFS *client*)
   3. verify it locally: manifest status OK, every check passed, file sizes and row counts match
   4. rename .incoming-<version> -> <version>     (atomic on one filesystem)
@@ -33,7 +33,7 @@ def run(cmd):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--version", required=True)
-    ap.add_argument("--source", required=True, help="hdfs://node2:9000/search/exports or a local folder")
+    ap.add_argument("--source", required=True, help="hdfs://node2:9000/serving or a local folder")
     ap.add_argument("--serving", default=None, help="default: $SERVING_DIR or <repo>/state/serving")
     ap.add_argument("--service", default="http://localhost:8000", help="'' to skip the reload call")
     args = ap.parse_args()
@@ -49,10 +49,10 @@ def main():
     os.makedirs(args.serving, exist_ok=True)
 
     # 1. finished?
-    done = (run(["hdfs", "dfs", "-test", "-e", src + "/_SUCCESS"]) == 0) if is_hdfs \
-        else os.path.exists(os.path.join(os.path.expanduser(src), "_SUCCESS"))
+    done = (run(["hdfs", "dfs", "-test", "-e", src + "/_READY"]) == 0) if is_hdfs \
+        else os.path.exists(os.path.join(os.path.expanduser(src), "_READY"))
     if not done:
-        sys.exit(f"REFUSED: {src}/_SUCCESS not found - export missing or not finished. "
+        sys.exit(f"REFUSED: {src}/_READY not found - export missing or not finished. "
                  f"Still serving {serving.read_current()}.")
 
     # 2. copy

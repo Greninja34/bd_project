@@ -51,7 +51,7 @@ The fingerprint was identical with an executor killed in the middle of the run.
 |---|---|---|
 | checks | 13, all PASS | 13, all PASS |
 | docs / postings / terms | 1000 / 233,643 / 37,551 | 975 / 220,622 / 36,521 |
-| files | `docs/`, `postings/` ~850 KB, `manifest.json`, `_SUCCESS` | similar |
+| files | `docs.parquet`, `index.parquet` ~850 KB, `manifest.json`, `_READY` | similar |
 | `--simulate-failure` | | 3 FAIL (5 docs without PageRank, sum 0.998, 1 orphan posting) → nothing published, exit 1 |
 
 ### Search (node 4): top 3 per query
@@ -117,7 +117,7 @@ Query latency: 2–30 ms. Loading + verifying a version: ~0.1 s, a few tens of M
 - **Change detection by snapshot diff:** the spec's "detect changes from Iceberg". Works after a rollback too.
 - **Incremental index, full PageRank:** postings are per document; PageRank is global.
 - **RDD PageRank:** lineage is explicit, which is what the fault-tolerance demo shows.
-- **Export = gate:** 13 checks, temp folder, `_SUCCESS` last, atomic rename. Node 4 verifies again. The switch is complete or it does not happen.
+- **Export = gate:** 13 checks, temp folder, `_READY` last, atomic rename. Node 4 verifies again. The switch is complete or it does not happen.
 - **Node 4 serves Parquet from local disk:** no dependency on the cluster at query time. A bad Iceberg update cannot break search.
 - **Shared tokenizer:** queries and documents go through the same `textproc.py`.
 
@@ -210,7 +210,7 @@ Master vs worker vs driver vs executor; what the index's `groupBy` shuffles; inc
 - *Incremental:* the job finds the docs snapshot it indexed last time (in `pipeline_runs`), asks Iceberg for the diff to the current one, deletes the postings of those docs and adds postings for the ones that still exist. Checked equal to a full rebuild (same hash).
 - *PageRank:* each iteration `links.join(ranks)` → every doc sends `rank/outdegree` → `reduceByKey` → `(1-d)/N + d·(incoming + dangling/N)`. Dangling = rank of docs with no out-link (501 of 1000).
 - *Fault tolerance:* cached `ranks` partitions and shuffle files on the killed executor are lost. The scheduler sees `ExecutorLostFailure`/`FetchFailed`, re-runs the parent stages from the lineage, retries the failed tasks. Nothing is checkpointed. If the **driver** dies the job is lost (rerun; Iceberg commits are atomic).
-- *Export safety:* write to `_tmp_vN_<time>/`, run the blocking checks, write `manifest.json` and `_SUCCESS`, then **rename** to `vN`. HDFS rename is atomic.
+- *Export safety:* write to `_tmp_vN_<time>/`, run the blocking checks, write `manifest.json` and `_READY`, then **rename** to `vN`. HDFS rename is atomic.
 - *Why is PageRank slower than the index?* Latency-bound: 10 iterations × several small jobs × a shuffle each. The index is CPU-bound. That is why shuffle partitions are 8, not 200.
 
 ### M4, node4: search (`code/node4_search/`)
@@ -219,7 +219,7 @@ The BM25 formula (k1 = 1.2, b = 0.75); the two bugs in the course snippet; the f
 - *Bug 2:* it starts **every** doc at 0.0, so with `+ 0.3·PageRank` docs matching nothing would rank. We only score docs containing at least one query term.
 - *Score:* `IDF(t) = ln(1 + (N - df + 0.5)/(df + 0.5))`; per doc `IDF · tf·(k1+1) / (tf + k1·(1 - b + b·len/avgdl))`, summed over the query's distinct terms. `final = 0.7·BM25/max BM25 (this query) + 0.3·PR/max PR (corpus)`.
 - *Why max BM25 per query but max PageRank over the corpus?* BM25 depends on the query; PageRank is a fixed property of the corpus.
-- *`pull_export.py` steps:* `_SUCCESS` in HDFS? → `hdfs dfs -get` into a hidden `.incoming-vN` → verify locally (manifest OK, checks passed, sizes, row counts) → rename to `vN` → write `CURRENT` (temp file + rename) → `POST /api/admin/reload`. The service loads and verifies again before swapping under a lock; on failure it keeps the old version and `CURRENT` is put back.
+- *`pull_export.py` steps:* `_READY` in HDFS? → `hdfs dfs -get` into a hidden `.incoming-vN` → verify locally (manifest OK, checks passed, sizes, row counts) → rename to `vN` → write `CURRENT` (temp file + rename) → `POST /api/admin/reload`. The service loads and verifies again before swapping under a lock; on failure it keeps the old version and `CURRENT` is put back.
 - *Why load everything in memory?* 975 docs and 220k postings are a few tens of MB. A query takes milliseconds and needs no Spark.
 - *Repeated query words?* Counted once (`dict.fromkeys`), usual BM25 practice.
 
@@ -320,7 +320,7 @@ You already did the course guides (Java 11, Hadoop 3.3.6, Spark 3.3.4 + Python 3
 
 **Steps**
 - **S18.** Formatting writes an empty NameNode metadata directory (`state/hdfs/namenode`) and gives the filesystem a new cluster ID. Every DataNode later remembers that ID; formatting again would make existing DataNodes refuse to join (and erase all HDFS metadata). If `jps` shows old course daemons, stop them as in S11 first.
-- **S19.** Starts the NameNode in the background (log in `state/logs/hadoop/`). It listens on `172.23.194.191:9000`. Right after start it is in safe mode (read-only) until DataNodes report; for an empty new filesystem it leaves it by itself within ~30 s (`hdfs dfsadmin -safemode leave` as last resort). The five folders: `/search/input/phase-0` and `/search/input/phase-1` raw files, `/search/exports` exports for node4, `/warehouse` Iceberg tables, `/spark-logs` Spark event logs (the history server reads it).
+- **S19.** Starts the NameNode in the background (log in `state/logs/hadoop/`). It listens on `172.23.194.191:9000`. Right after start it is in safe mode (read-only) until DataNodes report; for an empty new filesystem it leaves it by itself within ~30 s (`hdfs dfsadmin -safemode leave` as last resort). The five folders: `/search/input/phase-0` and `/search/input/phase-1` raw files, `/serving` exports for node4, `/warehouse` Iceberg tables, `/spark-logs` Spark event logs (the history server reads it).
 - **S20 / S24.** The DataNode stores the block files (`state/hdfs/datanode`) and reports to the NameNode at `node2:9000` (port 9866 for data). The worker registers at the Spark master on node3 (`spark://172.23.10.141:7077`); it keeps retrying until node3's master is up, so the order between M2 and M3 does not matter.
 - **S22 / S25.** The gate asks the NameNode which DataNodes are alive (`dfsadmin -report`), asks the Spark master (status page as JSON; **the trailing slash in `/json/` matters**) which workers are ALIVE, and checks safe mode, the five folders, and a written-and-deleted test file with `Live_repl=2`. DataNodes and workers need a few seconds to register: wait 30 s and run it again.
 - **S39.** `lake_report.py` prints every table, its row count and its snapshots. `ls -R` shows the Iceberg files in HDFS (`data/` = Parquet rows, `metadata/` = JSON + Avro; `version-hint.text` says which `vN` is current). `fsck` shows replication of those files. `CREATE TAG` gives a snapshot a permanent name. Do this BEFORE Phase 1 is ingested, after M3's tables exist. A tag that already exists: use another name.
@@ -338,7 +338,7 @@ You already did the course guides (Java 11, Hadoop 3.3.6, Spark 3.3.4 + Python 3
 - Spark standalone: master (7077, UI 8080), workers (2 here), driver, executors; why the driver's ports are pinned (40000/40001) and why node3 runs in WSL2 with ZeroTier inside.
 - The inverted index (term → doc, tf), BM25, and full vs **incremental** index (Iceberg tells which docs changed between two snapshots).
 - PageRank (d = 0.85, 10 iterations, dangling-node mass spread evenly, sum of ranks = 1) written with RDDs; why the fingerprint stays the same after an executor crash (lineage recomputation).
-- The export: 13 validation checks, `_SUCCESS` file, rename to `_failed_...` on failure, why a broken export is never served.
+- The export: 13 validation checks, `_READY` file, rename to `_failed_...` on failure, why a broken export is never served.
 - Where time and network go (the metering demo); why 8 shuffle partitions.
 
 **Steps**
@@ -347,7 +347,7 @@ You already did the course guides (Java 11, Hadoop 3.3.6, Spark 3.3.4 + Python 3
 - **S27.** The same test as S26 with node3 as the driver. `check.hello` now has a second row: two drivers on two machines share one Iceberg table on HDFS. `--drop` (run last) deletes the test table.
 - **S33.** Reads the `docs` table, turns wiki markup into terms, counts term frequency per doc and writes `postings` and `doc_stats` to Iceberg. The first time it builds everything (`full`).
 - **S34.** Reads the `links` table, runs 10 PageRank iterations with RDD joins and `reduceByKey`, spreads the rank of docs without out-links evenly, writes the `pagerank` table. `--phase` is only for the run log.
-- **S35.** Runs 13 checks (index built from the current docs snapshot, every doc has a PageRank, ranks sum to 1, no orphan postings, ...). Only if all pass does it write plain Parquet (docs, postings) plus `manifest.json` and `_SUCCESS` to `/search/exports/v0`. If a check fails the folder is renamed `_failed_v0_<time>` and the job exits 1. The gate `export v0` re-reads `manifest.json` (status OK, 13/13 checks) from HDFS.
+- **S35.** Runs 13 checks (index built from the current docs snapshot, every doc has a PageRank, ranks sum to 1, no orphan postings, ...). Only if all pass does it write plain Parquet (docs, postings) plus `manifest.json` and `_READY` to `/serving/v0`. If a check fails the folder is renamed `_failed_v0_<time>` and the job exits 1. The gate `export v0` re-reads `manifest.json` (status OK, 13/13 checks) from HDFS.
 - **S44.** The first run asks Iceberg which docs differ between the snapshot of the last index and now, and re-indexes only those. The second run finds nothing to do. (`--full` forces a rebuild.)
 - **S45.** PageRank is global (one changed link changes everything), so it is fully recomputed.
 - **S51-S53.** `--slow-seconds 3` makes every task sleep 3 s so the job lasts long enough to kill something. `grep -oE ... | sort | uniq -c` counts the failure messages in the driver log. Spark recomputed the lost partitions from lineage, so the fingerprint equals the clean run.
@@ -363,7 +363,7 @@ You already did the course guides (Java 11, Hadoop 3.3.6, Spark 3.3.4 + Python 3
 **You must be able to explain**
 - Why the service reads exported Parquet, not Iceberg (Iceberg problems like the bad DELETE cannot reach search).
 - The ranking: `score = 0.7 · BM25/max + 0.3 · PageRank/max` (blue and orange bars in the UI); why April is 5th (above).
-- What `pull_export.py` does in order: look for `_SUCCESS`, `hdfs dfs -get` into `.incoming-<v>`, verify manifest and counts, atomic rename, write `CURRENT`, ask the service to reload.
+- What `pull_export.py` does in order: look for `_READY`, `hdfs dfs -get` into `.incoming-<v>`, verify manifest and counts, atomic rename, write `CURRENT`, ask the service to reload.
 - Versions on node4 (`state/serving/v0`, `v1`, `CURRENT`) and switching without downtime.
 - What happens on `REFUSED`.
 
@@ -391,7 +391,7 @@ You already did the course guides (Java 11, Hadoop 3.3.6, Spark 3.3.4 + Python 3
 | phase | 69 matches (was 20): the 25 added and 25 updated pages |
 | computer science | 174 matches; "Computer science (Phase 1)" (110) |
 
-- **S40 / S50 (`check.sh pulled vN`, `serve vN`).** `pulled` reads `state/serving/vN` on node4 (`_SUCCESS`, manifest OK, 13/13); `serve` asks `/api/health` (version and doc count) and runs the query `ocean`.
-- **S55.** There is no `_SUCCESS` for `v1-broken` (the failed export was renamed), so the pull refuses at step 1 and nothing changes.
+- **S40 / S50 (`check.sh pulled vN`, `serve vN`).** `pulled` reads `state/serving/vN` on node4 (`_READY`, manifest OK, 13/13); `serve` asks `/api/health` (version and doc count) and runs the query `ocean`.
+- **S55.** There is no `_READY` for `v1-broken` (the failed export was renamed), so the pull refuses at step 1 and nothing changes.
 - **S56.** Both versions sit side by side in `state/serving/`; the POST makes the service load another one in memory (or in the UI: *Versions on this node* → *serve this*).
 - **S67 / another day.** Stop = Ctrl-C in terminal A; start again with S28 (it loads `CURRENT`). Rehearse from zero: empty `state/serving`, start the service again.

@@ -34,8 +34,8 @@ import serving  # noqa: E402
 
 
 def _read(path, name):
-    p = os.path.join(path, name)
-    return pq.ParquetDataset(p).read().to_pandas() if os.path.isdir(p) else None
+    p = os.path.join(path, name + ".parquet")
+    return pq.read_table(p).to_pandas() if os.path.isfile(p) else None
 
 
 class LoadedVersion:
@@ -47,7 +47,7 @@ class LoadedVersion:
         self.manifest = serving.verify_export(path)      # raises ExportInvalid
         self.name = name
         self.docs = _read(path, "docs").set_index("doc_id")
-        self.index = _read(path, "postings").set_index("term").sort_index()
+        self.index = _read(path, "index").set_index("term").sort_index()
         self.pagerank = self.docs["pagerank"].to_dict()
         self.max_pagerank = float(self.docs["pagerank"].max())
         r = self.manifest["ranking"]
@@ -109,6 +109,20 @@ def _need():
     if cur is None:
         raise HTTPException(503, f"no version loaded yet ({_state['last_error'] or 'run pull_export.py'})")
     return cur
+
+
+@app.get("/search")                      # alias: the TA verification guide calls /search?q=...&limit=...
+def search_alias(q: str = Query(..., min_length=1), limit: int = Query(10, ge=1, le=100)):
+    return search(q, limit)
+
+
+@app.get("/health")                      # alias of /api/health (TA guide calls /health)
+def health_alias():
+    h = health()
+    v = h.get("version")                 # TA guide expects {"status":"ok","version":1}: "v1" -> 1
+    if isinstance(v, str) and v[1:].isdigit() and v[:1] == "v":
+        h["version"] = int(v[1:])
+    return h
 
 
 @app.get("/api/search")

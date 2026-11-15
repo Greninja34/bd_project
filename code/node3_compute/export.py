@@ -1,20 +1,20 @@
 """Node 3 - validate everything, then export plain Parquet for the search service on Node 4.
 
   node3:
-    spark-submit code/node3_compute/export.py --version v0 --export-root hdfs://node2:9000/search/exports --phase 0
+    spark-submit code/node3_compute/export.py --version v0 --export-root hdfs://node2:9000/serving --phase 0
 
 Writes, in HDFS:
-    <root>/<version>/docs/      Parquet: doc_id, url, title, length, pagerank, snippet
-    <root>/<version>/postings/  Parquet: term, doc_id, tf, df
+    <root>/<version>/docs.parquet   one Parquet file: doc_id, url, title, length, pagerank, snippet
+    <root>/<version>/index.parquet  one Parquet file: term, doc_id, tf, df  (the inverted index)
     <root>/<version>/manifest.json   counts, snapshot ids, ranking parameters, every check's result
-    <root>/<version>/_SUCCESS        written LAST: "this export is complete and valid"
+    <root>/<version>/_READY          written LAST: "this export is complete and valid"
 
 How a half-written or invalid export can never be served:
   * everything is written into <root>/_tmp_<version>_<time> first;
   * if any check fails, that folder is renamed to _failed_<version>_<time> and the job exits 1;
-  * only when every check passes do we write manifest + _SUCCESS and rename the folder to
+  * only when every check passes do we write manifest + _READY and rename the folder to
     <root>/<version> (an HDFS rename is atomic: Node 4 sees either nothing or the whole export).
-Node 4 only switches to a version whose _SUCCESS exists and whose manifest says status = OK.
+Node 4 only switches to a version whose _READY exists and whose manifest says status = OK.
 
 --simulate-failure deliberately breaks the data (for the demo "keep the old version if export fails").
 """
@@ -69,7 +69,7 @@ class HFS:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--version", required=True, help="e.g. v0 for phase 0, v1 for phase 1")
-    ap.add_argument("--export-root", required=True, help="e.g. hdfs://node2:9000/search/exports")
+    ap.add_argument("--export-root", required=True, help="e.g. hdfs://node2:9000/serving")
     ap.add_argument("--overwrite", action="store_true", help="replace an existing export of this version")
     ap.add_argument("--simulate-failure", action="store_true", help="demo: corrupt the export on purpose")
     ap.add_argument("--phase", type=int, default=-1)
@@ -143,11 +143,17 @@ def main():
     ok = all(c["ok"] for c in checks if c["level"] == "error")
 
     # ---- write -----------------------------------------------------------------------------------
-    out_docs.select("doc_id", "url", "title", "length", "pagerank", "snippet") \
-            .coalesce(1).write.mode("overwrite").parquet(f"{tmp}/docs")
-    out_post.orderBy("term", "doc_id").coalesce(1).write.mode("overwrite").parquet(f"{tmp}/postings")
+    # Spark writes a folder of part files; coalesce(1) gives one part, which we move to a plain
+    # <name>.parquet file (the layout the TAs expect: docs.parquet + index.parquet).
+    for df, name in ((out_docs.select("doc_id", "url", "title", "length", "pagerank", "snippet"), "docs"),
+                     (out_post.orderBy("term", "doc_id"), "index")):
+        df.coalesce(1).write.mode("overwrite").parquet(f"{tmp}/_w_{name}")
+        part = [p for p, _ in fs.files(f"{tmp}/_w_{name}") if p.endswith(".parquet")]
+        assert len(part) == 1, part
+        fs.rename(part[0], f"{tmp}/{name}.parquet")
+        fs.delete(f"{tmp}/_w_{name}")
     avgdl = out_docs.agg(F.avg("length")).collect()[0][0]
-    files = [{"path": "/".join(p.rsplit("/", 2)[-2:]), "bytes": n}     # e.g. docs/part-00000-....parquet
+    files = [{"path": p.rsplit("/", 1)[-1], "bytes": n}                # docs.parquet, index.parquet
              for p, n in fs.files(tmp) if p.endswith(".parquet")]
     manifest = {
         "version": args.version, "status": "OK" if ok else "FAILED", "created_at": stamp,
@@ -172,7 +178,7 @@ def main():
         spark.stop()
         sys.exit(1)
 
-    fs.write_text(f"{tmp}/_SUCCESS", "")
+    fs.write_text(f"{tmp}/_READY", "")
     if fs.exists(final):
         fs.rename(final, f"{root}/_replaced_{args.version}_{stamp}")
     fs.rename(tmp, final)                       # atomic publish

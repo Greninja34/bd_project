@@ -1,7 +1,7 @@
 """Loading and validating one export version from the local serving directory (Node 4).
 
 Serving directory layout (default <repo>/state/serving, override with SERVING_DIR):
-    serving/v0/          a complete, verified export (docs/, postings/, manifest.json, _SUCCESS)
+    serving/v0/          a complete, verified export (docs.parquet, index.parquet, manifest.json, _READY)
     serving/v1/
     serving/CURRENT      one line: the version the service should serve, e.g. "v1"
 
@@ -26,8 +26,8 @@ def verify_export(path):
     """Raise ExportInvalid unless `path` is a complete export whose manifest says OK. Returns the manifest."""
     if not os.path.isdir(path):
         raise ExportInvalid(f"{path} does not exist")
-    if not os.path.exists(os.path.join(path, "_SUCCESS")):
-        raise ExportInvalid("no _SUCCESS marker: export not finished")
+    if not os.path.exists(os.path.join(path, "_READY")):
+        raise ExportInvalid("no _READY marker: export not finished")
     try:
         with open(os.path.join(path, "manifest.json")) as f:
             m = json.load(f)
@@ -42,8 +42,8 @@ def verify_export(path):
         p = os.path.join(path, f["path"])
         if not os.path.exists(p) or os.path.getsize(p) != f["bytes"]:
             raise ExportInvalid(f"file missing or wrong size: {f['path']}")
-    n_docs = pq.ParquetDataset(os.path.join(path, "docs")).read(columns=["doc_id"]).num_rows
-    n_post = pq.ParquetDataset(os.path.join(path, "postings")).read(columns=["doc_id"]).num_rows
+    n_docs = pq.ParquetFile(os.path.join(path, "docs.parquet")).metadata.num_rows
+    n_post = pq.ParquetFile(os.path.join(path, "index.parquet")).metadata.num_rows
     if n_docs != m["counts"]["docs"] or n_post != m["counts"]["postings"]:
         raise ExportInvalid(f"row counts {n_docs}/{n_post} do not match manifest "
                             f"{m['counts']['docs']}/{m['counts']['postings']}")

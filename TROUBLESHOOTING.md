@@ -255,7 +255,7 @@ ls ~/bd_project/state/jars/                          # iceberg-spark-runtime-3.3
 ```bash
 spark-submit code/node3_compute/build_index.py --phase N 2> state/logs/index-pN.log
 spark-submit code/node3_compute/pagerank.py --phase N 2> state/logs/pagerank-pN.log
-spark-submit code/node3_compute/export.py --version vN --phase N --export-root hdfs://node2:9000/search/exports 2> state/logs/export-vN.log
+spark-submit code/node3_compute/export.py --version vN --phase N --export-root hdfs://node2:9000/serving 2> state/logs/export-vN.log
 ```
 
 <a id="exists"></a>
@@ -263,7 +263,7 @@ spark-submit code/node3_compute/export.py --version vN --phase N --export-root h
 
 **Cause:** that export version is in HDFS already.
 ```bash
-spark-submit code/node3_compute/export.py --version v0 --phase 0 --overwrite --export-root hdfs://node2:9000/search/exports 2> state/logs/export-v0.log   # old one is kept as _replaced_v0_<time>
+spark-submit code/node3_compute/export.py --version v0 --phase 0 --overwrite --export-root hdfs://node2:9000/serving 2> state/logs/export-v0.log   # old one is kept as _replaced_v0_<time>
 # or use a new name, e.g. v2
 ```
 `Table ... already exists` from `ALTER TABLE ... CREATE TAG`: the tag name is taken; use another name.
@@ -341,11 +341,11 @@ nc -zv -w 3 node3 7077 ; curl -s http://172.23.10.141:8080/json/ | head -c 200  
 ```
 
 <a id="export-bad"></a>
-## `check.sh export vN` / `pulled vN`: manifest not OK, `_SUCCESS` missing, counts wrong
+## `check.sh export vN` / `pulled vN`: manifest not OK, `_READY` missing, counts wrong
 
-**Cause:** the export job failed (the folder is then renamed `_failed_vN_<time>` and there is no `_SUCCESS`), is still running, or was made from the wrong phase.
+**Cause:** the export job failed (the folder is then renamed `_failed_vN_<time>` and there is no `_READY`), is still running, or was made from the wrong phase.
 ```bash
-hdfs dfs -ls /search/exports
+hdfs dfs -ls /serving
 tail -40 ~/bd_project/state/logs/export-vN.log       # the 13 checks: which one is FAIL?
 ```
 Fix the cause (usually [stale export](#stale-export)), export again (RUNBOOK S35 / S46), pull again (S37 / S48). The v1-broken demo folder is supposed to look like this.
@@ -359,9 +359,9 @@ Fix the cause (usually [stale export](#stale-export)), export again (RUNBOOK S35
 curl -s localhost:8000/api/health ; echo
 ss -tlnp | grep :8000                                 # must be 0.0.0.0:8000
 cd ~/bd_project/code/node4_search && uvicorn app:app --host 0.0.0.0 --port 8000 2>&1 | tee ~/bd_project/state/logs/serve.log
-python code/node4_search/pull_export.py --version v1 --source hdfs://node2:9000/search/exports     # from ~/bd_project
+python code/node4_search/pull_export.py --version v1 --source hdfs://node2:9000/serving     # from ~/bd_project
 ```
-`REFUSED: ... _SUCCESS not found`: the export is not finished or failed ([export-bad](#export-bad)). The old version keeps serving.
+`REFUSED: ... _READY not found`: the export is not finished or failed ([export-bad](#export-bad)). The old version keeps serving.
 
 ---
 

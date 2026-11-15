@@ -46,8 +46,10 @@ SQL="spark-sql --master local[2] --conf spark.eventLog.enabled=false"      # M1,
 
 | When | Part | Who |
 |---|---|---|
-| Tonight | **A** check the cluster, reset to Phase 0 and rebuild it, then shut down | M3, M2, M4, M1 |
-| Tomorrow morning | **B** start the cluster, **C** check-list | all |
+| Tonight | **A** check the cluster, reset to Phase 0 and rebuild it | M3, M2, M4, M1 |
+| Tonight, after A2 | **A3** shut down and power off (and the "never do" list) | M4, M3, M2, all |
+| Tomorrow, T-30 min | **B** boot, network, start the cluster (timeline at the top of Part B) | all |
+| Tomorrow, T-15 min | **C** check-list, terminals and tabs ready | all |
 | Demo, 0:00 | **D** live Phase 1 and the TA checks | M2, M1, M3, M4 |
 | After a rehearsal | **E** reset | Part A |
 
@@ -188,7 +190,9 @@ bash scripts/check.sh serve v0
 - M4: `curl -s "http://localhost:8000/search?q=beard&limit=5" | python3 -m json.tool` → doc 94 title is plain "Beard".
 - M3: `$SQL -e "SELECT doc_id, rank FROM iceberg_catalog.search.pagerank WHERE doc_id = '146'" 2>/dev/null` → rank of doc 146: ____________
 
-### A3 · Shut down cleanly (in this order; each waits for the previous one)
+➡ Then (M3): post the doc 146 rank in the team chat too (it does not change overnight, so it is not re-taken tomorrow). Everyone notes how long each of their Phase 0 jobs took: that is the time budget for Part D.
+
+### A3 · Shut down cleanly tonight (in this order; each waits for the previous one)
 
 **A3.1 · M4 · node4**: Ctrl-C in terminal A. ➡ "node4 stopped".
 
@@ -214,11 +218,41 @@ bash scripts/check.sh down
 jps
 ```
 ✅ Expect: `GATE down PASSED`; `jps` shows only `Jps`.
-Do **not** delete `~/bd_project/state` and do **not** format HDFS.
+
+**A3.5 · everyone · power off normally**
+- VMs (node1, node2, node4): `sudo poweroff` inside the VM. Do not suspend the VM.
+- node3: shut Windows down normally.
+
+**Never do this, tonight or tomorrow before the demo:**
+- delete `~/bd_project/state` (it holds HDFS, the tables, the configs, node4's v0 and `CURRENT`);
+- format HDFS (`hdfs namenode -format`);
+- run `scripts/clean_old.sh`, or redo any setup or configuration step (it would add `spark.jars` back);
+- run any Part D command before the examiner is there.
+
+`git pull` is fine: it only changes documents.
 
 ---
 
-# PART B · Tomorrow morning: start the cluster (about 5 min, no format)
+# PART B · Tomorrow, 30 minutes before the demo: boot and start the cluster (no format)
+
+| Time | Who | Step | Expect |
+|---|---|---|---|
+| T-30 | everyone | **B0** boot, network, opener | machines up, on the network |
+| T-28 | everyone | **B1** network and ZeroTier | `GATE network PASSED` on all 4 |
+| T-25 | M2 | **B2** start node2 | "node2 up" |
+| T-24 | M3 | **B3** start node3 | `DataNode Master Worker HistoryServer` |
+| T-22 | M2 | **B2.1** safe mode and DataNodes | `Safe mode is OFF`, `Live datanodes (2)` |
+| T-20 | everyone | **B4** gates | `hdfs` and `spark` `PASSED` |
+| T-18 | M4 | **B5** start the search service | `"version":0`, 1000 docs |
+| T-15 | everyone | **Part C** check-list | every box ticked |
+| T-10 | everyone | **C8** terminals ready for Part D | opener and `$SQL` set |
+| T-5 | projector | **C5** tabs | 2 DataNodes, 2 workers, UI answers |
+| T-0 | M2 | **D1** | the examiner is there |
+
+**B0 · everyone · boot and join the network**
+- Boot the machines; join the network (school Wi-Fi, or a phone hotspot if it does not work). node4 stays on its Bridged adapter.
+- M3: open the Ubuntu (WSL) window and keep it open the whole time; set Windows to never sleep.
+- Every terminal: `source ~/bd_project/venv/bin/activate && cd ~/bd_project`.
 
 **B1 · everyone · network first** (before any daemon)
 ```bash
@@ -230,7 +264,7 @@ getent hosts $(hostname)                        # your own ZeroTier IP, never 12
 bash scripts/check.sh setup && bash scripts/check.sh network
 ```
 ✅ Expect: 4 × `ok`, both gates `PASSED` on all four nodes. (node3's ping may fail because WSL drops ICMP; trust `check.sh network`.)
-If not: M3 checks WSL is running and `ip -4 -br a` shows `172.23.10.141`; M4 switches the VM adapter back to NAT if Bridged does not work on this Wi-Fi; a phone hotspot is the fallback.
+If not: the failing node runs `sudo systemctl restart zerotier-one` and checks again; M3 checks WSL is running and `ip -4 -br a` shows `172.23.10.141`; if the Wi-Fi blocks ZeroTier, that member moves to a phone hotspot.
 ➡ Then: "network OK" from each member.
 
 **B2 · M2 · node2 · NameNode, DataNode, worker**
@@ -239,13 +273,12 @@ hdfs --daemon start namenode
 sleep 10
 hdfs --daemon start datanode
 start-worker.sh spark://172.23.10.141:7077
-hdfs dfsadmin -safemode get
 ```
-✅ Expect: `Safe mode is OFF` (wait up to 30 s).
-➡ Then: "NameNode up".
+➡ Then: "node2 up". M3 goes.
 
 **B3 · M3 · node3 · DataNode, master, worker, history server**
 ```bash
+ip -4 -br a | grep 172.23        # must show 172.23.10.141 first
 hdfs --daemon start datanode
 start-master.sh
 start-worker.sh spark://172.23.10.141:7077
@@ -253,6 +286,14 @@ hdfs dfs -test -d /spark-logs && start-history-server.sh
 jps
 ```
 ✅ Expect: `DataNode Master Worker HistoryServer`.
+➡ Then: "node3 up".
+
+**B2.1 · M2 · node2 · safe mode off, two DataNodes**
+```bash
+hdfs dfsadmin -safemode get
+hdfs dfsadmin -report | grep -E "Live datanodes|Dead datanodes|^Name:"
+```
+✅ Expect: `Safe mode is OFF` (wait up to 30 s) and `Live datanodes (2)` with 172.23.194.191 and 172.23.10.141. Only 1: **X1**.
 ➡ Then: "daemons up".
 
 **B4 · all · gates**
@@ -289,6 +330,7 @@ hdfs dfs -ls /search/input/phase-1     # empty
 **C2 · M1 · node1 · the lake holds only Phase 0**
 ```bash
 bash scripts/check.sh ingest0
+# the SQL lines below are optional (skip them if short of time; the gate already proves Phase 0)
 $SQL -e "SELECT count(*) FROM iceberg_catalog.search.docs" 2>/dev/null
 $SQL -e "SELECT phase, change_type, count(*) FROM iceberg_catalog.search.doc_changes GROUP BY phase, change_type" 2>/dev/null
 $SQL -e "SELECT name, type, snapshot_id FROM iceberg_catalog.search.docs.refs" 2>/dev/null
@@ -316,11 +358,19 @@ python code/node4_search/q.py "bubonic plague"
 **C5 · projector machine · tabs**
 - [ ] NameNode `http://node2:9870` · Spark master `http://172.23.10.141:8080` · history server `http://172.23.10.141:18080` · search UI `http://node4:8000`.
 
-**C6 · M4 and M3 · baselines** (from A2.12; re-take them if the cluster was restarted)
-- [ ] doc 94 is "Beard" (M4). Rank of doc 146 = ____________ (M3).
+**C6 · M4 and M3 · baselines** (written down last night in A2.12)
+- [ ] M4: `curl -s "http://localhost:8000/search?q=beard&limit=5" | python3 -m json.tool` → doc 94 is "Beard".
+- [ ] M3: rank of doc 146 from last night's note = ____________ (no need to query again).
 
 **C7 · everyone**
 - [ ] **No Phase 1 command has been run.** If one was, do Part E.
+
+**C8 · everyone · terminals ready for Part D (T-10)**
+```bash
+source ~/bd_project/venv/bin/activate && cd ~/bd_project
+SQL="spark-sql --master local[2] --conf spark.eventLog.enabled=false"      # M1, M2, M3
+```
+- [ ] VERIFY.md open at Part D. M4: terminal A untouched (service running), terminal B ready.
 
 ---
 

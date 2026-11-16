@@ -7,10 +7,11 @@ Iceberg rollback only moves a table's "current" pointer back. No data file is de
 Rules: do NOT format HDFS, do NOT touch configs, do NOT re-run RUNBOOK S10. Say the step id in chat, and wait for the
 previous "-> Then" line before you start. Order: M4, M2, M1, M3, M4.
 
-Opener in every new terminal:
+Opener in every new terminal (a new tab does NOT keep `$SQL`; if it is empty, every query silently prints nothing):
 ```bash
 source ~/bd_project/venv/bin/activate && cd ~/bd_project
 SQL="spark-sql --master local[2] --conf spark.eventLog.enabled=false"      # M1, M2, M3 only
+echo "SQL=[$SQL]"                                                           # must NOT be empty
 ```
 
 | Member | Node | IP |
@@ -72,17 +73,33 @@ Sanity rule: `docs` has the Phase 0 `append` and the Phase 1 `overwrite`. Every 
 Write the 7 ids in chat (table = id). Two members read them back to each other before the next step.
 -> M2 says: "ids confirmed".
 
+**Result of R2 on the real cluster (2026-11-16):** every table has its Phase 0 snapshot on Nov 15 and its Phase 1
+snapshots on Nov 16 around 06:30-06:34. So the target is each table's **first** snapshot. Tags: `phase0` = docs
+1924517539370191510, links 651111322562401618 (also match node4's v0/v1 manifests).
+
+| Table | Keep (Phase 0, Nov 15) | Undone (Phase 1, Nov 16) |
+|---|---|---|
+| docs | 1924517539370191510 | 3881463493591252475 overwrite |
+| links | 651111322562401618 | 8458040388182981944 overwrite |
+| doc_changes | 6668719201492334362 | 1009215172256891482 append |
+| rejects | 5684273552200551533 | 6134455812770939852 overwrite |
+| doc_stats | 3560202070785274221 | 5415325527300001198 overwrite, 4263511296141202663 append |
+| postings | 5808878121980650934 | 4445164179182379447 overwrite, 3079378255060852544 append |
+| pagerank | 4088327784687043324 | the Nov 16 06:34 overwrite |
+
+The ids above were read from photos: compare each with the screen. A wrong id only gives a "snapshot does not exist" error.
+
 ## R3 · M2 · node2 · roll the Iceberg tables back
 
-Replace each `<ID_...>` with the id from R2. One table at a time.
+One table at a time, no `2>/dev/null` (so an error is visible). Use the ids from the R2 table.
 ```bash
-$SQL -e "CALL iceberg_catalog.system.rollback_to_snapshot('search.docs',        <ID_docs>)"        2>/dev/null
-$SQL -e "CALL iceberg_catalog.system.rollback_to_snapshot('search.links',       <ID_links>)"       2>/dev/null
-$SQL -e "CALL iceberg_catalog.system.rollback_to_snapshot('search.doc_changes', <ID_doc_changes>)" 2>/dev/null
-$SQL -e "CALL iceberg_catalog.system.rollback_to_snapshot('search.rejects',     <ID_rejects>)"     2>/dev/null
-$SQL -e "CALL iceberg_catalog.system.rollback_to_snapshot('search.doc_stats',   <ID_doc_stats>)"   2>/dev/null
-$SQL -e "CALL iceberg_catalog.system.rollback_to_snapshot('search.postings',    <ID_postings>)"    2>/dev/null
-$SQL -e "CALL iceberg_catalog.system.rollback_to_snapshot('search.pagerank',    <ID_pagerank>)"    2>/dev/null
+$SQL -e "CALL iceberg_catalog.system.rollback_to_snapshot('search.docs',        1924517539370191510)"
+$SQL -e "CALL iceberg_catalog.system.rollback_to_snapshot('search.links',       651111322562401618)"
+$SQL -e "CALL iceberg_catalog.system.rollback_to_snapshot('search.doc_changes', 6668719201492334362)"
+$SQL -e "CALL iceberg_catalog.system.rollback_to_snapshot('search.rejects',     5684273552200551533)"
+$SQL -e "CALL iceberg_catalog.system.rollback_to_snapshot('search.doc_stats',   3560202070785274221)"
+$SQL -e "CALL iceberg_catalog.system.rollback_to_snapshot('search.postings',    5808878121980650934)"
+$SQL -e "CALL iceberg_catalog.system.rollback_to_snapshot('search.pagerank',    4088327784687043324)"
 ```
 Check right away:
 ```bash
